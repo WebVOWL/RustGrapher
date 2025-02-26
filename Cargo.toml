@@ -2,8 +2,14 @@
 name = "grapher"
 version = "0.2.2"
 edition = "2021"
-authors = [ "Alexander Neuhäuser <alexander.neuhaeuser@leafnova.net>" ]
-repository = "https://github.com/iceHtwoO/RustGrapher"
+authors = [
+    "Alexander Neuhäuser <alexander.neuhaeuser@leafnova.net>",
+    "Kneckerino",
+    "KristianEmilWN",
+    "nikarnik",
+    "TheRealMorgenfrue",
+]
+repository = "https://github.com/WebVOWL/RustGrapher"
 license-file = "LICENSE"
 description = "Simulate and visualize a force directed graph"
 keywords = ["graph", "graphics", "simulation", "force-directed-graph"]
@@ -14,15 +20,14 @@ exclude = [
     "example_images/*",
     "examples/reference.json",
     ".github/*",
-    "tools/*"
+    "tools/*",
 ]
 
 [dependencies]
 glam = "0.29.0"
-glium = "0.33"
 petgraph = "0.6.5"
 rand = "0.8.5"
-winit = { version = "0.28.7"}
+winit = { version = "0.28.7" }
 
 [[example]]
 name = "wikipedia"
