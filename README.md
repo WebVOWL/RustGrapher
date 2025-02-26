@@ -1,3 +1,8 @@
+>[!NOTE]
+> This fork ports RustGrapher to WebAssembly
+> The official supported platform is `wasm32-unknown-unknown`, however other wasm targets might work as well
+> However, any other target platform is not supported!
+
 # RustGrapher
 
 A library to simulate and visualize a 2D [force directed graph](https://en.wikipedia.org/wiki/Force-directed_graph_drawing) in rust.
