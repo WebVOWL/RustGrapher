@@ -1,6 +1,6 @@
 >[!NOTE]
-> This fork ports RustGrapher to WebAssembly
-> The official supported platform is `wasm32-unknown-unknown`, however other wasm targets might work as well
+> This fork ports RustGrapher to WebAssembly  
+> The official supported platform is `wasm32-unknown-unknown`, however, other wasm targets might work as well  
 > However, any other target platform is not supported!
 
 # RustGrapher
