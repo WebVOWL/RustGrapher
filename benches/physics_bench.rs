@@ -1,6 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use glam::Vec2;
-use grapher::{quadtree::BoundingBox2D, quadtree::QuadTree};
+use grapher::desktop::{quadtree::BoundingBox2D, quadtree::QuadTree};
 use rand::Rng;
 
 const NODE: [u32; 10] = [10, 100, 500, 1000, 2500, 3250, 4000, 5000, 10000, 30000];

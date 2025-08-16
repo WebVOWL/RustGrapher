@@ -1,5 +1,4 @@
 {
-    "rust-analyzer.checkOnSave.command": "clippy",
     "files.exclude": {
         "**/.git": true,
         "**/.svn": true,
@@ -8,5 +7,40 @@
         "**/.DS_Store": true,
         "**/Thumbs.db": true
     },
-    "hide-files.files": []
+    "[rust]": {
+        "editor.defaultFormatter": "rust-lang.rust-analyzer"
+    },
+    "rust-analyzer.cargo.features": ["desktop", "wasm"],
+    "[markdown]": {
+        "files.trimTrailingWhitespace": false,
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[json]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[toml]": {
+        "editor.defaultFormatter": "tamasfe.even-better-toml"
+    },
+    "editor.codeActionsOnSave": {
+        "source.organizeImports": "always",
+        "source.sortImports": "always"
+    },
+    "editor.formatOnSave": true,
+
+    // Even Better TOML
+    "evenBetterToml.formatter.alignComments": true,
+    "evenBetterToml.formatter.alignEntries": false,
+    "evenBetterToml.formatter.compactEntries": true,
+    "evenBetterToml.formatter.compactArrays": true,
+    "evenBetterToml.formatter.compactInlineTables": true,
+    "evenBetterToml.formatter.arrayAutoCollapse": true,
+    "evenBetterToml.formatter.arrayAutoExpand": true,
+    "evenBetterToml.formatter.arrayTrailingComma": true,
+    "evenBetterToml.formatter.indentEntries": true,
+    "evenBetterToml.formatter.indentTables": true,
+    "evenBetterToml.formatter.inlineTableExpand": true,
+    "evenBetterToml.formatter.reorderArrays": false,
+    "evenBetterToml.formatter.reorderInlineTables": true,
+    "evenBetterToml.formatter.reorderKeys": true,
+    "evenBetterToml.formatter.trailingNewline": true,
 }

@@ -1,7 +1,7 @@
 //! # Example
 //! ```no_run
-//!use grapher::renderer::Renderer;
-//!use grapher::simulator::SimulatorBuilder;
+//!use grapher::desktop::renderer::Renderer;
+//!use grapher::desktop::simulator::SimulatorBuilder;
 //!use petgraph::Directed;
 //!
 //!let mut rng = rand::thread_rng();
@@ -17,7 +17,8 @@
 //!renderer.create_window();
 //! ```
 
-pub mod properties;
-pub mod quadtree;
-pub mod renderer;
-pub mod simulator;
+#[cfg(feature = "desktop")]
+pub mod desktop;
+
+#[cfg(feature = "wasm")]
+pub mod wasm;

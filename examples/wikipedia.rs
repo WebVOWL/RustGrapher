@@ -1,5 +1,5 @@
-use grapher::renderer::Renderer;
-use grapher::simulator::SimulatorBuilder;
+use grapher::desktop::renderer::Renderer;
+use grapher::desktop::simulator::SimulatorBuilder;
 use petgraph::Directed;
 use petgraph::Graph;
 use serde::Deserialize;

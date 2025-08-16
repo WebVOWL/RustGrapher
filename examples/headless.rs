@@ -1,4 +1,4 @@
-use grapher::simulator::SimulatorBuilder;
+use grapher::desktop::simulator::SimulatorBuilder;
 use petgraph::Directed;
 
 fn main() {
