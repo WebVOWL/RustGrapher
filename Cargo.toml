@@ -35,25 +35,18 @@
     rayon="1.10.0"
     winit={version="0.28.7", optional=true}
 
-    [dependencies.bevy]
+    [dependencies.smallvec]
         default-features=false
-        features=[
-            "async_executor",     # Uses async-executor as a task execution backend.
-            "bevy_core_pipeline", # Provides cameras and other basic render pipeline features.
-            #"bevy_debug_stepping", # Enable stepping-based debugging of Bevy systems.
-            "bevy_dev_tools", # Provides a collection of developer tools.
-            "bevy_render",    # Provides rendering functionality.
-            "bevy_state",     # Enable built in global state machines.
-            "bevy_ui",        # A custom ECS-driven UI framework.
-            #"bevy_ui_debug",       # Provides a debug overlay for bevy UI.
-            #"critical-section",    # Provides the building blocks for synchronization primitives on all platforms, including no_std.
-            "multi_threaded", # Enables parallelism in the engine. Disabling it forces all engine tasks to run on a single thread.
-            "std",            # Allows access to the std crate.
-            "sysinfo_plugin", # Enables system information diagnostic plugin
-            "web",            # Enables use of browser APIs. Note this is currently only applicable on wasm32 architectures.
-        ]
+        features=["union"]
         optional=true
-        version="0.16"
+        version="1.15.1"
+
+    [dependencies.specs]
+        default-features=false
+        features=["parallel", "stdweb"]
+        optional=true
+        version="0.20.0"
+
 
 [dev-dependencies]
     criterion={version="0.5", features=["html_reports"]}
@@ -63,7 +56,7 @@
 
 [features]
     desktop=["dep:glium", "dep:winit"]
-    wasm=["dep:bevy"]
+    wasm=["dep:smallvec", "dep:specs"]
 
 [[example]]
     name="wikipedia"
@@ -86,12 +79,14 @@
     lto=false
     opt-level=1
     overflow-checks=true
-    panic="abort"
+    panic="unwind"
 
 # This profile is used for production releases - compile time doesn't matter.
 [profile.release]
+    codegen-units=1
     debug=false
     debug-assertions=false
+    incremental=false
     lto=true
     opt-level=3
     overflow-checks=false
