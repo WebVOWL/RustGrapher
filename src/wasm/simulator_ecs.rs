@@ -5,7 +5,7 @@ use crate::{
     },
     quadtree::{BoundingBox2D, QuadTree},
 };
-use bevy::prelude::*;
+use specs::{World, WorldExt, Builder};
 use glam::{Vec2, Vec3, Vec3Swizzles};
 use petgraph::{
     prelude::StableGraph,

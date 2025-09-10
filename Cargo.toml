@@ -12,12 +12,7 @@
         "examples/reference.json",
         "tools/*",
     ]
-    keywords=[
-        "force-directed-graph",
-        "graph",
-        "graphics",
-        "simulation",
-    ]
+    keywords=["force-directed-graph", "graph", "graphics", "simulation"]
     license-file="LICENSE"
     name="grapher"
     readme="README.md"
@@ -43,7 +38,7 @@
 
     [dependencies.specs]
         default-features=false
-        features=["parallel", "stdweb"]
+        features=["specs-derive", "parallel", "stdweb"]
         optional=true
         version="0.20.0"
 
