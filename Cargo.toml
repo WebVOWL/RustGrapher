@@ -23,12 +23,20 @@
     crate-type=["cdylib", "rlib"]
 
 [dependencies]
+    anyhow="1.0"
     glam="0.29.0"
     glium={version="0.33", optional=true}
     petgraph="0.6.5"
+    pollster="0.3"
     rand="0.8.5"
     rayon="1.10.0"
     winit={version="0.28.7", optional=true}
+
+    [dependencies.wgpu]
+        default-features=false
+        features=["webgpu", "static-dxc", "web", "std", "parking_lot"]
+        optional=true
+        version="26.0.1"
 
     [dependencies.smallvec]
         default-features=false
@@ -51,7 +59,7 @@
 
 [features]
     desktop=["dep:glium", "dep:winit"]
-    wasm=["dep:smallvec", "dep:specs"]
+    wasm=["dep:smallvec", "dep:specs", "dep:wgpu"]
 
 [[example]]
     name="wikipedia"
