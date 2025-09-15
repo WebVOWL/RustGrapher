@@ -1,11 +1,12 @@
-use crate::{
-    properties::{RigidBody2D, Spring},
-    properties_ecs::{
-        Connects, Edge, Fixed, Mass, Node, Position, SpringNeutralLength, SpringStiffness, Velocity,
+use crate::wasm::{
+    components::{
+        edge::Connects,
+        forces::NodeForces,
+        node::{Fixed, Mass, Position, Velocity},
     },
-    quadtree::{BoundingBox2D, QuadTree},
+    quadtree_ecs::{BoundingBox2D, QuadTree},
+    ressources::{Damping, DeltaTime, FreezeThreshold, GravityForce, QuadTreeTheta, RepelForce},
 };
-use specs::{World, WorldExt, Builder};
 use glam::{Vec2, Vec3, Vec3Swizzles};
 use petgraph::{
     prelude::StableGraph,
@@ -13,26 +14,153 @@ use petgraph::{
 };
 use rand::Rng;
 use rayon::prelude::*;
+use specs::{
+    Builder, Dispatcher, DispatcherBuilder, Entities, Join, LazyUpdate, ParJoin, Read, ReadExpect, ReadStorage, System, World, WorldExt, WriteStorage
+};
 use std::{
-    fmt::Debug,
     sync::{Arc, Mutex, RwLock},
     thread::{self, JoinHandle},
 };
 
+struct ForceCalculation;
+
+impl ForceCalculation {
+    /// Computes the repel force between two positions.
+    ///
+    /// Usage in force calculations is as follows: Number 1 is the actual node,
+    /// number 2 is the "fake", approximate node.
+    fn repel_force(pos1: Vec2, pos2: Vec2, mass1: f32, mass2: f32, repel_force: f32) -> Vec2 {
+        let dir_vec = pos2 - pos1;
+
+        if dir_vec.length_squared() == 0.0 {
+            return Vec2::ZERO;
+        }
+
+        let f = -repel_force * (mass1 * mass2).abs() / dir_vec.length_squared();
+        let dir_vec_normalized = dir_vec.normalize_or(Vec2::ZERO);
+        let force = dir_vec_normalized * f;
+
+        force.clamp(
+            Vec2::new(-100000.0, -100000.0),
+            Vec2::new(100000.0, 100000.0),
+        )
+    }
+}
+
+impl<'a> System<'a> for ForceCalculation {
+    type SystemData = (
+        ReadStorage<'a, Position>,
+        ReadStorage<'a, Mass>,
+        ReadStorage<'a, Fixed>,
+        WriteStorage<'a, NodeForces>,
+        ReadExpect<'a, QuadTree>,
+        Read<'a, QuadTreeTheta>,
+        Read<'a, RepelForce>,
+    );
+
+    fn run(
+        &mut self,
+        (positions, masses, fixed, mut node_forces, quadtree, theta, repel_force): Self::SystemData,
+    ) {
+        (&positions, &masses, !&fixed, &mut node_forces)
+            .par_join()
+            .for_each(|(pos, mass, (), node_forces)| {
+                let node_approximations = quadtree.stack(&pos.0, theta.0);
+
+                for node_approximation in node_approximations {
+                    node_forces.0 += Self::repel_force(
+                        pos.0,
+                        node_approximation.position(),
+                        mass.0,
+                        node_approximation.mass(),
+                        repel_force.0,
+                    );
+                }
+            });
+    }
+}
+
+struct CalculateGravityForce;
+
+impl<'a> System<'a> for CalculateGravityForce {
+    type SystemData = (
+        ReadStorage<'a, Position>,
+        ReadStorage<'a, Mass>,
+        WriteStorage<'a, NodeForces>,
+        Read<'a, GravityForce>,
+    );
+
+    // compute_center_gravity()
+    fn run(&mut self, (positions, masses, mut forces, gravity_force): Self::SystemData) {
+        for (pos, mass, force) in (&positions, &masses, &mut forces).join() {
+            force.0 += -pos.0 * mass.0 * gravity_force.0;
+        }
+    }
+}
+
+struct ApplyNodeForce;
+
+impl<'a> System<'a> for ApplyNodeForce {
+    type SystemData = (
+        ReadStorage<'a, NodeForces>,
+        WriteStorage<'a, Velocity>,
+        ReadStorage<'a, Mass>,
+        Read<'a, DeltaTime>,
+    );
+
+    fn run(&mut self, (forces, mut velocities, masses, delta_time): Self::SystemData) {
+        for (force, velocity, mass) in (&forces, &mut velocities, &masses).join() {
+            velocity.0 += force.0 / mass.0 * delta_time.0
+        }
+    }
+}
+
+struct UpdateNodePosition;
+
+impl<'a> System<'a> for UpdateNodePosition {
+    type SystemData = (
+        Entities<'a>,
+        WriteStorage<'a, Position>,
+        WriteStorage<'a, Velocity>,
+        ReadStorage<'a, Fixed>,
+        Read<'a, DeltaTime>,
+        Read<'a, Damping>,
+        Read<'a, FreezeThreshold>,
+        Read<'a, LazyUpdate>,
+    );
+
+    fn run(
+        &mut self,
+        (
+            entities,
+            mut positions,
+            mut velocities,
+            fixeds,
+            delta_time,
+            damping,
+            freeze_threshold,
+            updater,
+        ): Self::SystemData,
+    ) {
+        for (velocity, _) in (&mut velocities, &fixeds).join() {
+            velocity.0 = Vec2::ZERO;
+        }
+        for (pos, velocity, _) in (&mut positions, &mut velocities, !&fixeds).join() {
+            velocity.0 *= damping.0;
+
+            pos.0 += velocity.0 * delta_time.0;
+
+            let fixed = entities.create();
+            if freeze_threshold.0 > velocity.0.abs().length() {
+                updater.insert(fixed, Fixed);
+            }
+        }
+    }
+}
+
 pub struct Simulator {
     world: World,
-    repel: bool,
-    spring: bool,
-    gravity: bool,
-    spring_stiffness: f32,
-    spring_neutral_length: f32,
-    delta_time: f32,
-    gravity_force: f32,
-    repel_force_const: f32,
-    damping: f32,
-    quadtree_theta: f32,
-    freeze_thresh: f32,
-    max_threads: u32,
+    dispatcher: Dispatcher,
 }
 
 impl Simulator {
@@ -51,33 +179,36 @@ impl Simulator {
     //     avg / rb_guard.len() as f32
     // }
 
-    /// Inserts a node into the simulator.
-    /// Becomes inefficient if called repeatedly to insert many nodes at once.
-    /// For batch insertion of nodes, please use the batch insertion method.
-    pub fn insert_node(&mut self, vec: Vec3) {
-        self.world.spawn(Node {
-            position: Position(vec.xy()),
-            mass: Mass(5.0),
-            ..Default::default()
-        });
+    /// Inserts a single node into the simulator.
+    pub fn insert_node(&mut self, vec: Vec2) {
+        self.world
+            .create_entity()
+            .with(Position(vec))
+            .with(Velocity::default())
+            .with(Mass::default())
+            .build();
     }
 
-    /// TODO: Implement
-    pub fn insert_node_batch(&mut self, vec: Vec<Vec3>) {}
+    /// Inserts multiple nodes into the simulator.
+    pub fn insert_node_batch(&mut self, vec: Vec<Vec2>) {
+        for pos in vec {
+            self.insert_node(pos);
+        }
+    }
 
     pub fn simulation_step(&self) {
         // Lock so actions can only be performed when sim step has ended
-        let _lock = self.simulation_thread_lock.write().unwrap();
+        // let _lock = self.simulation_thread_lock.write().unwrap();
 
-        let f_vec = Arc::new(Mutex::new(vec![
-            Vec2::ZERO;
-            self.rigid_bodies.read().unwrap().len()
-        ]));
+        // let f_vec = Arc::new(Mutex::new(vec![
+        //     Vec2::ZERO;
+        //     self.rigid_bodies.read().unwrap().len()
+        // ]));
 
-        self.calculate_forces(Arc::clone(&f_vec));
+        // self.calculate_forces(Arc::clone(&f_vec));
 
-        self.apply_node_force(Arc::clone(&f_vec));
-        self.update_node_position();
+        // self.apply_node_force(Arc::clone(&f_vec));
+        // self.update_node_position();
     }
 
     fn calculate_forces(&self, mut query: Query<(&Position, &Mass)>) {
@@ -140,31 +271,31 @@ impl Simulator {
             #[allow(clippy::needless_range_loop)]
             for i in start_index..end_index {
                 let rb = &rb_vec.read().unwrap()[i];
-                if rb.fixed {
-                    continue;
-                }
-                if repel_force {
-                    // Get node approximation from Quadtree
-                    let node_approximations = quadtree.stack(&rb.position, theta);
+                // if rb.fixed {
+                //     continue;
+                // }
+                // if repel_force {
+                //     // Get node approximation from Quadtree
+                //     let node_approximations = quadtree.stack(&rb.position, theta);
 
-                    // Calculate Repel Force
-                    for node_approximation in node_approximations {
-                        let node_approximation_particle = RigidBody2D::new(
-                            node_approximation.position(),
-                            node_approximation.mass(),
-                        );
-                        let repel_force =
-                            Self::repel_force(repel_force_const, rb, &node_approximation_particle);
+                //     // Calculate Repel Force
+                //     for node_approximation in node_approximations {
+                //         let node_approximation_particle = RigidBody2D::new(
+                //             node_approximation.position(),
+                //             node_approximation.mass(),
+                //         );
+                //         let repel_force =
+                //             Self::repel_force(repel_force_const, rb, &node_approximation_particle);
 
-                        force_vec[i] += repel_force;
-                    }
-                }
+                //         force_vec[i] += repel_force;
+                //     }
+                // }
 
                 //Calculate Gravity Force
-                if gravity {
-                    let gravity_force = Self::compute_center_gravity(gravity_force, rb);
-                    force_vec[i] += gravity_force;
-                }
+                // if gravity {
+                //     let gravity_force = Self::compute_center_gravity(gravity_force, rb);
+                //     force_vec[i] += gravity_force;
+                // }
             }
 
             {
@@ -179,34 +310,34 @@ impl Simulator {
         handle
     }
 
-    fn apply_node_force(&self, force_vec_arc: Arc<Mutex<Vec<Vec2>>>) {
-        let mut graph_write_guard = self.rigid_bodies.write().unwrap();
-        let force_vec = force_vec_arc.lock().unwrap();
-        for (i, rb) in graph_write_guard.iter_mut().enumerate() {
-            let node_force = force_vec[i];
+    // fn apply_node_force(&self, force_vec_arc: Arc<Mutex<Vec<Vec2>>>) {
+    //     let mut graph_write_guard = self.rigid_bodies.write().unwrap();
+    //     let force_vec = force_vec_arc.lock().unwrap();
+    //     for (i, rb) in graph_write_guard.iter_mut().enumerate() {
+    //         let node_force = force_vec[i];
 
-            rb.velocity += node_force / rb.mass * self.delta_time;
-        }
-    }
+    //         rb.velocity += node_force / rb.mass * self.delta_time;
+    //     }
+    // }
 
-    fn update_node_position(&self) {
-        let mut graph_write_guard = self.rigid_bodies.write().unwrap();
+    // fn update_node_position(&self) {
+    //     let mut graph_write_guard = self.rigid_bodies.write().unwrap();
 
-        'damping: for rb in graph_write_guard.iter_mut() {
-            if rb.fixed {
-                rb.velocity = Vec2::ZERO;
-                continue 'damping;
-            }
+    //     'damping: for rb in graph_write_guard.iter_mut() {
+    //         if rb.fixed {
+    //             rb.velocity = Vec2::ZERO;
+    //             continue 'damping;
+    //         }
 
-            rb.velocity *= self.damping;
+    //         rb.velocity *= self.damping;
 
-            rb.position += rb.velocity * self.delta_time;
+    //         rb.position += rb.velocity * self.delta_time;
 
-            if self.freeze_thresh > rb.total_velocity() {
-                rb.fixed = true;
-            }
-        }
-    }
+    //         if self.freeze_thresh > rb.total_velocity() {
+    //             rb.fixed = true;
+    //         }
+    //     }
+    // }
 
     fn compute_spring_forces_edges(&self, force_vec_arc: Arc<Mutex<Vec<Vec2>>>) {
         let mut force_vec = force_vec_arc.lock().unwrap();
@@ -232,27 +363,27 @@ impl Simulator {
         direction_vec.normalize_or(Vec2::ZERO) * -force_magnitude
     }
 
-    fn repel_force(repel_force_const: f32, n1: &RigidBody2D, n2: &RigidBody2D) -> Vec2 {
-        let dir_vec: Vec2 = n2.position - n1.position;
+    // fn repel_force(repel_force_const: f32, n1: &RigidBody2D, n2: &RigidBody2D) -> Vec2 {
+    //     let dir_vec: Vec2 = n2.position - n1.position;
 
-        if dir_vec.length_squared() == 0.0 {
-            return Vec2::ZERO;
-        }
+    //     if dir_vec.length_squared() == 0.0 {
+    //         return Vec2::ZERO;
+    //     }
 
-        let f = -repel_force_const * (n1.mass * n2.mass).abs() / dir_vec.length_squared();
+    //     let f = -repel_force_const * (n1.mass * n2.mass).abs() / dir_vec.length_squared();
 
-        let dir_vec_normalized = dir_vec.normalize_or(Vec2::ZERO);
-        let force = dir_vec_normalized * f;
+    //     let dir_vec_normalized = dir_vec.normalize_or(Vec2::ZERO);
+    //     let force = dir_vec_normalized * f;
 
-        force.clamp(
-            Vec2::new(-100000.0, -100000.0),
-            Vec2::new(100000.0, 100000.0),
-        )
-    }
+    //     force.clamp(
+    //         Vec2::new(-100000.0, -100000.0),
+    //         Vec2::new(100000.0, 100000.0),
+    //     )
+    // }
 
-    fn compute_center_gravity(gravity_force: f32, node: &RigidBody2D) -> Vec2 {
-        -node.position * node.mass * gravity_force
-    }
+    // fn compute_center_gravity(gravity_force: f32, node: &RigidBody2D) -> Vec2 {
+    //     -node.position * node.mass * gravity_force
+    // }
 
     pub fn find_closest_node_index(&self, loc: Vec3) -> Option<u32> {
         let rb_read = self.rigid_bodies.read().unwrap();
@@ -297,44 +428,6 @@ fn build_quadtree(rb_vec_arc: Arc<RwLock<Vec<RigidBody2D>>>) -> QuadTree {
         quadtree.insert(rb.position, rb.mass);
     }
     quadtree
-}
-
-fn build_property_vec<T, E, D>(graph: StableGraph<T, E, D, u32>, edge_based_mass: bool) -> World
-where
-    D: petgraph::EdgeType,
-{
-    let mut world = World::new();
-    let mut nodes = Vec::with_capacity(graph.node_count());
-    let mut edges = Vec::with_capacity(graph.edge_count());
-
-    // Builds the node components in parallel
-    nodes.par_extend((0..graph.node_count()).into_par_iter().map(|_| Node {
-        position: Position(Vec2::new(
-            rand::thread_rng().gen_range(-60.0..60.0),
-            rand::thread_rng().gen_range(-60.0..60.0),
-        )),
-        ..Default::default()
-    }));
-
-    // TODO: Figure out how to parallelize `graph.edge_references()`
-    for s in graph.edge_references() {
-        if edge_based_mass {
-            nodes[s.target().index()].mass.0 += 1.0;
-            nodes[s.source().index()].mass.0 += 1.0;
-        }
-
-        edges.push(Edge {
-            connects: Connects {
-                src: s.source().index(),
-                target: s.target().index(),
-            },
-            ..Default::default()
-        });
-    }
-
-    world.spawn_batch(nodes);
-    world.spawn_batch(edges);
-    return world;
 }
 
 /// Builder for `Simulator`
@@ -498,23 +591,47 @@ impl SimulatorBuilder {
     where
         D: petgraph::EdgeType,
     {
-        let world = build_property_vec(graph, self.edge_based_mass);
-        world
+        let world = Self::build_world(graph, self.edge_based_mass);
+        let dispatcher = DispatcherBuilder::new().with(ForceCalculation, "force", "")
         Simulator {
             world: world,
-            repel: self.repel,
-            spring: self.spring,
-            gravity: self.gravity,
-            repel_force_const: self.repel_force_const,
-            spring_stiffness: self.spring_stiffness,
-            spring_neutral_length: self.spring_neutral_length,
-            gravity_force: self.gravity_force,
-            delta_time: self.delta_time,
-            damping: self.damping,
-            quadtree_theta: self.quadtree_theta,
-            freeze_thresh: self.freeze_thresh,
-            max_threads: self.max_threads,
+            dispatcher
         }
+    }
+
+    fn build_world<T, E, D>(nodes: Vec, edges: Vec) -> World {
+        let mut world = World::new();
+        let mut nodes = Vec::with_capacity(graph.node_count());
+        let mut edges = Vec::with_capacity(graph.edge_count());
+
+        // Builds the node components in parallel
+        nodes.par_extend((0..graph.node_count()).into_par_iter().map(|_| Node {
+            position: Position(Vec2::new(
+                rand::thread_rng().gen_range(-60.0..60.0),
+                rand::thread_rng().gen_range(-60.0..60.0),
+            )),
+            ..Default::default()
+        }));
+
+        // TODO: Figure out how to parallelize `graph.edge_references()`
+        for s in graph.edge_references() {
+            // if edge_based_mass {
+            //     nodes[s.target().index()].mass.0 += 1.0;
+            //     nodes[s.source().index()].mass.0 += 1.0;
+            // }
+
+            edges.push(Edge {
+                connects: Connects {
+                    src: s.source().index(),
+                    target: s.target().index(),
+                },
+                ..Default::default()
+            });
+        }
+
+        world.spawn_batch(nodes);
+        world.spawn_batch(edges);
+        return world;
     }
 }
 

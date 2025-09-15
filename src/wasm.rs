@@ -1,5 +1,7 @@
-pub mod properties_ecs;
-pub mod quadtree_ecs;
+mod components;
+mod quadtree_ecs;
 pub mod renderer_ecs;
+mod ressources;
 pub mod simulator_ecs;
-pub mod world_builder;
+mod system_data;
+mod world_builder;
