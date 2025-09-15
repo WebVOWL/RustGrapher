@@ -1,4 +1,6 @@
-use specs::World;
+use glam::Vec2;
+use rayon::iter::*;
+use specs::{World, WorldExt};
 
 pub fn build_world(nodes: Vec, edges: Vec) -> World {
     let mut world = World::new();
