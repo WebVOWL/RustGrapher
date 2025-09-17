@@ -3,7 +3,7 @@
 use specs::{Component, Entity, VecStorage};
 
 /// An edge connects exactly two nodes.
-#[derive(Component, Default)]
+#[derive(Component)]
 #[storage(VecStorage)]
 pub struct Connects {
     pub src: Entity,

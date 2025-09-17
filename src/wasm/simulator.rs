@@ -1,0 +1,595 @@
+mod components;
+mod ressources;
+
+use crate::wasm::{
+    quadtree_ecs::{BoundingBox2D, QuadTree},
+    simulator::{
+        components::{
+            edges::Connects,
+            forces::NodeForces,
+            nodes::{Fixed, Mass, Position, Velocity},
+        },
+        ressources::{
+            event_channels::{
+                DampingChan, DeltaTimeChan, FreezeThresholdChan, GravityForceChan,
+                QuadTreeThetaChan, RepelForceChan, SpringNeutralChan, SpringStiffnessChan,
+            },
+            simulator_vars::{
+                Damping, DeltaTime, FreezeThreshold, GravityForce, QuadTreeTheta, RepelForce,
+                SpringNeutralLength, SpringStiffness,
+            },
+        },
+    },
+};
+use glam::Vec2;
+use rayon::prelude::*;
+use specs::prelude::*;
+use specs::{
+    Builder, Dispatcher, DispatcherBuilder, Entities, Join, LazyUpdate, ParJoin, Read, ReadExpect,
+    ReadStorage, ReaderId, System, World, WorldExt, Write, WriteStorage,
+};
+
+#[derive(Default)]
+struct EventManager {
+    repel_force_reader: Option<ReaderId<f32>>,
+    spring_stiffness_reader: Option<ReaderId<f32>>,
+    spring_neutral_reader: Option<ReaderId<f32>>,
+    gravity_force_reader: Option<ReaderId<f32>>,
+    deltatime_reader: Option<ReaderId<f32>>,
+    damping_reader: Option<ReaderId<f32>>,
+    quadtree_theta_reader: Option<ReaderId<f32>>,
+    freeze_threshold_reader: Option<ReaderId<f32>>,
+}
+
+impl<'a> System<'a> for EventManager {
+    type SystemData = (
+        Read<'a, RepelForceChan>,
+        Read<'a, SpringStiffnessChan>,
+        Read<'a, SpringNeutralChan>,
+        Read<'a, GravityForceChan>,
+        Read<'a, DeltaTimeChan>,
+        Read<'a, DampingChan>,
+        Read<'a, QuadTreeThetaChan>,
+        Read<'a, FreezeThresholdChan>,
+        Write<'a, RepelForce>,
+        Write<'a, SpringStiffness>,
+        Write<'a, SpringNeutralLength>,
+        Write<'a, GravityForce>,
+        Write<'a, DeltaTime>,
+        Write<'a, Damping>,
+        Write<'a, QuadTreeTheta>,
+        Write<'a, FreezeThreshold>,
+    );
+
+    fn run(
+        &mut self,
+        (
+            repel_events,
+            spring_stiffness_events,
+            spring_neutral_events,
+            gravity_events,
+            deltatime_events,
+            damping_events,
+            quadtree_theta_events,
+            freeze_threshold_events,
+            mut repel_force,
+            mut spring_stiffness,
+            mut spring_length,
+            mut gravity_force,
+            mut deltatime,
+            mut damping,
+            mut quadtree_theta,
+            mut freeze_threshold,
+        ): Self::SystemData,
+    ) {
+        if let Some(val) = repel_events
+            .0
+            .read(&mut self.repel_force_reader.as_mut().unwrap())
+            .last()
+        {
+            repel_force.0 = *val;
+        }
+        if let Some(val) = spring_stiffness_events
+            .0
+            .read(&mut self.spring_stiffness_reader.as_mut().unwrap())
+            .last()
+        {
+            spring_stiffness.0 = *val;
+        }
+        if let Some(val) = spring_neutral_events
+            .0
+            .read(&mut self.spring_neutral_reader.as_mut().unwrap())
+            .last()
+        {
+            spring_length.0 = *val;
+        }
+        if let Some(val) = gravity_events
+            .0
+            .read(&mut self.gravity_force_reader.as_mut().unwrap())
+            .last()
+        {
+            gravity_force.0 = *val;
+        }
+        if let Some(val) = deltatime_events
+            .0
+            .read(&mut self.deltatime_reader.as_mut().unwrap())
+            .last()
+        {
+            deltatime.0 = *val;
+        }
+        if let Some(val) = damping_events
+            .0
+            .read(&mut self.damping_reader.as_mut().unwrap())
+            .last()
+        {
+            damping.0 = *val;
+        }
+        if let Some(val) = quadtree_theta_events
+            .0
+            .read(&mut self.quadtree_theta_reader.as_mut().unwrap())
+            .last()
+        {
+            quadtree_theta.0 = *val;
+        }
+        if let Some(val) = freeze_threshold_events
+            .0
+            .read(&mut self.freeze_threshold_reader.as_mut().unwrap())
+            .last()
+        {
+            freeze_threshold.0 = *val;
+        }
+    }
+
+    fn setup(&mut self, world: &mut World) {
+        Self::SystemData::setup(world);
+        self.repel_force_reader = Some(world.fetch_mut::<RepelForceChan>().0.register_reader());
+        self.spring_stiffness_reader =
+            Some(world.fetch_mut::<SpringStiffnessChan>().0.register_reader());
+        self.spring_neutral_reader =
+            Some(world.fetch_mut::<SpringNeutralChan>().0.register_reader());
+        self.gravity_force_reader = Some(world.fetch_mut::<GravityForceChan>().0.register_reader());
+        self.deltatime_reader = Some(world.fetch_mut::<DeltaTimeChan>().0.register_reader());
+        self.damping_reader = Some(world.fetch_mut::<DampingChan>().0.register_reader());
+        self.quadtree_theta_reader =
+            Some(world.fetch_mut::<QuadTreeThetaChan>().0.register_reader());
+        self.freeze_threshold_reader =
+            Some(world.fetch_mut::<FreezeThresholdChan>().0.register_reader());
+    }
+}
+
+struct QuadTreeConstructor;
+
+impl<'a> System<'a> for QuadTreeConstructor {
+    type SystemData = (
+        Write<'a, QuadTree>,
+        ReadStorage<'a, Position>,
+        ReadStorage<'a, Mass>,
+    );
+
+    fn run(&mut self, (mut quadtree, positions, masses): Self::SystemData) {
+        let mut min = Vec2::INFINITY;
+        let mut max = Vec2::NEG_INFINITY;
+        let mut count = 0;
+
+        // Join with masses to get node positions (as edges do not have the Mass component)
+        for (i, (position, _)) in (&positions, &masses).join().enumerate() {
+            min = min.min(position.0);
+            max = max.max(position.0);
+            count = i;
+        }
+
+        let dir = max - min;
+        let boundary = BoundingBox2D::new((dir / 2.0) + min, dir[0], dir[1]);
+        let mut new_tree = QuadTree::with_capacity(boundary, count);
+
+        for (position, mass) in (&positions, &masses).join() {
+            new_tree.insert(position.0, mass.0);
+        }
+        *quadtree = new_tree;
+    }
+}
+
+struct CalculateNodeForce;
+
+impl CalculateNodeForce {
+    /// Computes the repel force between two nodes.
+    ///
+    /// Usage in force calculations is as follows: Number 1 is the actual node,
+    /// number 2 is the "fake", approximate node.
+    fn repel_force(pos1: Vec2, pos2: Vec2, mass1: f32, mass2: f32, repel_force: f32) -> Vec2 {
+        let dir_vec = pos2 - pos1;
+
+        if dir_vec.length_squared() == 0.0 {
+            return Vec2::ZERO;
+        }
+
+        let f = -repel_force * (mass1 * mass2).abs() / dir_vec.length_squared();
+        let dir_vec_normalized = dir_vec.normalize_or(Vec2::ZERO);
+        let force = dir_vec_normalized * f;
+
+        force.clamp(
+            Vec2::new(-100000.0, -100000.0),
+            Vec2::new(100000.0, 100000.0),
+        )
+    }
+}
+
+impl<'a> System<'a> for CalculateNodeForce {
+    type SystemData = (
+        ReadStorage<'a, Position>,
+        ReadStorage<'a, Mass>,
+        ReadStorage<'a, Fixed>,
+        WriteStorage<'a, NodeForces>,
+        ReadExpect<'a, QuadTree>,
+        Read<'a, QuadTreeTheta>,
+        Read<'a, RepelForce>,
+    );
+
+    fn run(
+        &mut self,
+        (positions, masses, fixed, mut node_forces, quadtree, theta, repel_force): Self::SystemData,
+    ) {
+        (&positions, &masses, !&fixed, &mut node_forces)
+            .par_join()
+            .for_each(|(pos, mass, (), node_forces)| {
+                let node_approximations = quadtree.stack(&pos.0, theta.0);
+
+                for node_approximation in node_approximations {
+                    node_forces.0 += Self::repel_force(
+                        pos.0,
+                        node_approximation.position(),
+                        mass.0,
+                        node_approximation.mass(),
+                        repel_force.0,
+                    );
+                }
+            });
+    }
+}
+
+struct CalculateGravityForce;
+
+impl<'a> System<'a> for CalculateGravityForce {
+    type SystemData = (
+        ReadStorage<'a, Position>,
+        ReadStorage<'a, Mass>,
+        WriteStorage<'a, NodeForces>,
+        Read<'a, GravityForce>,
+    );
+
+    // compute_center_gravity()
+    fn run(&mut self, (positions, masses, mut forces, gravity_force): Self::SystemData) {
+        for (pos, mass, force) in (&positions, &masses, &mut forces).join() {
+            force.0 += -pos.0 * mass.0 * gravity_force.0;
+        }
+    }
+}
+
+struct ApplyNodeForce;
+
+impl<'a> System<'a> for ApplyNodeForce {
+    type SystemData = (
+        ReadStorage<'a, NodeForces>,
+        WriteStorage<'a, Velocity>,
+        ReadStorage<'a, Mass>,
+        Read<'a, DeltaTime>,
+    );
+
+    fn run(&mut self, (forces, mut velocities, masses, delta_time): Self::SystemData) {
+        for (force, velocity, mass) in (&forces, &mut velocities, &masses).join() {
+            velocity.0 += force.0 / mass.0 * delta_time.0;
+            print!("{0}", velocity.0);
+        }
+    }
+}
+
+struct UpdateNodePosition;
+
+impl<'a> System<'a> for UpdateNodePosition {
+    type SystemData = (
+        Entities<'a>,
+        WriteStorage<'a, Position>,
+        WriteStorage<'a, Velocity>,
+        ReadStorage<'a, Fixed>,
+        Read<'a, DeltaTime>,
+        Read<'a, Damping>,
+        Read<'a, FreezeThreshold>,
+        Read<'a, LazyUpdate>,
+    );
+
+    fn run(
+        &mut self,
+        (
+            entities,
+            mut positions,
+            mut velocities,
+            fixeds,
+            delta_time,
+            damping,
+            freeze_threshold,
+            updater,
+        ): Self::SystemData,
+    ) {
+        for (velocity, _) in (&mut velocities, &fixeds).join() {
+            velocity.0 = Vec2::ZERO;
+        }
+        for (pos, velocity, _) in (&mut positions, &mut velocities, !&fixeds).join() {
+            velocity.0 *= damping.0;
+
+            pos.0 += velocity.0 * delta_time.0;
+
+            let fixed = entities.create();
+            if freeze_threshold.0 > velocity.0.abs().length() {
+                updater.insert(fixed, Fixed);
+            }
+        }
+    }
+}
+
+struct UpdateEdgeForces;
+
+impl<'a> System<'a> for UpdateEdgeForces {
+    type SystemData = (
+        ReadStorage<'a, Connects>,
+        WriteStorage<'a, NodeForces>,
+        ReadStorage<'a, Position>,
+        Read<'a, SpringStiffness>,
+        Read<'a, SpringNeutralLength>,
+    );
+
+    fn run(
+        &mut self,
+        (connections, mut forces, positions, spring_stiffness, spring_neutral_length): Self::SystemData,
+    ) {
+        for connection in (&connections).join() {
+            let rb1 = connection.src;
+            let rb2 = connection.target;
+
+            let direction_vec = positions.get(rb1).unwrap().0 - positions.get(rb2).unwrap().0;
+            let force_magnitude =
+                spring_stiffness.0 * direction_vec.length() - spring_neutral_length.0;
+
+            let spring_force = direction_vec.normalize_or(Vec2::ZERO) * force_magnitude;
+
+            // Calling unwrap here is safe, as we're calling get on an already existing entity.
+            let rb1_force = forces.get(rb1).unwrap().0;
+            let rb2_force = forces.get(rb2).unwrap().0;
+
+            let _ = forces.insert(rb1, NodeForces(rb1_force.clone() - spring_force));
+            let _ = forces.insert(rb2, NodeForces(rb2_force.clone() + spring_force));
+        }
+    }
+}
+
+//#[warn(dead_code = false)]
+pub struct Simulator<'a, 'b> {
+    pub world: World,
+    pub dispatcher: Dispatcher<'a, 'b>,
+}
+
+impl<'a, 'b> Simulator<'a, 'b> {
+    pub fn builder() -> SimulatorBuilder {
+        SimulatorBuilder::default()
+    }
+
+    // TODO: Implement with signals
+    // pub fn find_closest_node_index(&self, loc: Vec3) -> Option<u32> {
+    //     let rb_read = self.rigid_bodies.read().unwrap();
+    //     let mut dist = f32::INFINITY;
+    //     let mut index = 0;
+    //     for (i, rb) in rb_read.iter().enumerate() {
+    //         let new_dist = rb.position.distance(loc.xy());
+    //         if new_dist < dist {
+    //             dist = new_dist;
+    //             index = i as u32;
+    //         }
+    //     }
+    //     if dist.is_infinite() {
+    //         None
+    //     } else {
+    //         Some(index)
+    //     }
+    // }
+
+    // TODO: Implement with signals
+    // pub fn set_node_location_by_index(&self, loc: Vec3, index: u32) {
+    //     let mut rb_write = self.rigid_bodies.write().unwrap();
+    //     rb_write[index as usize].position = loc.xy();
+    // }
+}
+
+/// Builder for `Simulator`
+pub struct SimulatorBuilder {
+    spring_stiffness: f32,
+    spring_neutral_length: f32,
+    delta_time: f32,
+    gravity_force: f32,
+    repel_force_const: f32,
+    damping: f32,
+    quadtree_theta: f32,
+    freeze_thresh: f32,
+}
+
+impl SimulatorBuilder {
+    /// Get a Instance of `SimulatorBuilder` with default values
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// How strong the spring force should be.
+    ///
+    /// Default: `100.0`
+    pub fn spring_stiffness(mut self, spring_stiffness: f32) -> Self {
+        self.spring_stiffness = spring_stiffness;
+        self
+    }
+
+    /// Length of a edge in neutral position.
+    ///
+    /// If edge is shorter it pushers apart.
+    /// If edge is longer it pulls together.
+    ///
+    /// Set to `0` if edges should always pull apart.
+    ///
+    /// Default: `2.0`
+    pub fn spring_neutral_length(mut self, neutral_length: f32) -> Self {
+        self.spring_neutral_length = neutral_length;
+        self
+    }
+
+    /// How strong the pull to the center should be.
+    ///
+    /// Default: `1.0`
+    pub fn gravity_force(mut self, gravity_force: f32) -> Self {
+        self.gravity_force = gravity_force;
+        self
+    }
+
+    /// How strong nodes should push others away.
+    ///
+    /// Default: `100.0`
+    pub fn repel_force(mut self, repel_force_const: f32) -> Self {
+        self.repel_force_const = repel_force_const;
+        self
+    }
+
+    /// Amount of damping that should be applied to the node's movement
+    ///
+    /// `1.0` -> No Damping
+    ///
+    /// `0.0` -> No Movement
+    ///
+    /// Default: `0.9`
+    pub fn damping(mut self, damping: f32) -> Self {
+        self.damping = damping;
+        self
+    }
+
+    /// How accurate the force calculations should be.
+    /// Higher numbers result in more approximations but faster calculations.
+    ///
+    /// Value should be between 0.0 and 1.0.
+    ///
+    /// `0.0` -> No approximation -> n^2 brute force
+    ///
+    /// Default: `0.75`
+    pub fn simulation_accuracy(mut self, theta: f32) -> Self {
+        self.quadtree_theta = theta;
+        self
+    }
+
+    /// Freeze nodes when their velocity falls below `freeze_thresh`.
+    /// Set to `-1` to disable
+    ///
+    /// Default: `1e-2`
+    pub fn freeze_threshold(mut self, freeze_thresh: f32) -> Self {
+        self.freeze_thresh = freeze_thresh;
+        self
+    }
+
+    /// How much time a simulation step should simulate. (euler method)
+    ///
+    /// Bigger time steps result in faster simulations, but less accurate or even wrong simulations.
+    ///
+    /// `delta_time` is in seconds
+    ///
+    /// Panics when delta time is `0` or below
+    ///
+    /// Default: `0.005`
+    pub fn delta_time(mut self, delta_time: f32) -> Self {
+        if delta_time <= 0.0 {
+            panic!("delta_time may not be 0 or below!");
+        }
+        self.delta_time = delta_time;
+        self
+    }
+
+    /// Constructs a instance of `Simulator`
+    pub fn build<'a, 'b>(self, nodes: Vec<Vec2>, edges: Vec<Vec2>) -> Simulator<'a, 'b> {
+        let mut world = World::new();
+        let mut dispatcher = DispatcherBuilder::new()
+            .with(EventManager::default(), "event_manager", &[])
+            .with(QuadTreeConstructor, "quadtree_constructor", &[])
+            .with(
+                CalculateNodeForce,
+                "calc_node_force",
+                &["quadtree_constructor"],
+            )
+            .with(CalculateGravityForce, "calc_gravity_force", &[])
+            .with(UpdateEdgeForces, "update_edge_forces", &["calc_node_force"])
+            .with(
+                ApplyNodeForce,
+                "apply_node_force",
+                &["calc_node_force", "calc_gravity_force"],
+            )
+            .with(
+                UpdateNodePosition,
+                "update_node_position",
+                &["apply_node_force"],
+            )
+            .build();
+
+        dispatcher.setup(&mut world);
+        Self::create_entities(&mut world, nodes, edges);
+        self.add_ressources(&mut world);
+
+        Simulator {
+            world: world,
+            dispatcher: dispatcher,
+        }
+        // TODO: We need signals to start / stop / pause the simulation
+    }
+
+    fn add_ressources(self: Self, world: &mut World) {
+        world.insert(RepelForce(self.repel_force_const));
+        world.insert(SpringStiffness(self.spring_stiffness));
+        world.insert(SpringNeutralLength(self.spring_neutral_length));
+        world.insert(GravityForce(self.gravity_force));
+        world.insert(DeltaTime(self.delta_time));
+        world.insert(Damping(self.damping));
+        world.insert(QuadTreeTheta(self.quadtree_theta));
+        world.insert(FreezeThreshold(self.freeze_thresh));
+        world.insert(QuadTree::default());
+    }
+
+    fn create_entities(world: &mut World, nodes: Vec<Vec2>, edges: Vec<Vec2>) {
+        let mut node_entities = Vec::with_capacity(nodes.len());
+
+        for node in nodes {
+            let node_entity = world
+                .create_entity()
+                .with(Position(node))
+                .with(Velocity::default())
+                .with(Mass::default())
+                .with(NodeForces::default())
+                .build();
+            node_entities.push(node_entity);
+        }
+
+        for edge in edges {
+            world
+                .create_entity()
+                .with(Connects {
+                    src: node_entities[edge.x as usize],
+                    target: node_entities[edge.y as usize],
+                })
+                .build();
+        }
+    }
+}
+
+impl Default for SimulatorBuilder {
+    /// Get a Instance of `SimulatorBuilder` with default values
+    fn default() -> Self {
+        Self {
+            repel_force_const: 100.0,
+            spring_stiffness: 100.0,
+            spring_neutral_length: 2.0,
+            gravity_force: 1.0,
+            delta_time: 0.005,
+            damping: 0.9,
+            quadtree_theta: 0.75,
+            freeze_thresh: 1e-2,
+        }
+    }
+}
