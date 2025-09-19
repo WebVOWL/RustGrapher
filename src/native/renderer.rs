@@ -6,7 +6,7 @@ use std::{
     time::Instant,
 };
 
-use crate::desktop::simulator::Simulator;
+use crate::native::simulator::Simulator;
 use camera::Camera;
 use event::EventManager;
 use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};

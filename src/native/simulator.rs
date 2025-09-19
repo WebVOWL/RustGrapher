@@ -11,7 +11,7 @@ use petgraph::{
 };
 use rand::Rng;
 
-use crate::desktop::{
+use crate::native::{
     properties::{RigidBody2D, Spring},
     quadtree::BoundingBox2D,
     quadtree::QuadTree,

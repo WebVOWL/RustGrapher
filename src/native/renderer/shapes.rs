@@ -1,6 +1,6 @@
 use std::f32::consts::PI;
 
-use crate::desktop::renderer::draw::Vertex;
+use crate::native::renderer::draw::Vertex;
 
 #[allow(dead_code)]
 pub fn rectangle(pos: [f32; 3], color: [f32; 4], s: f32) -> Vec<Vertex> {

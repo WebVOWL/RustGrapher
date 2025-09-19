@@ -10,7 +10,8 @@
     "[rust]": {
         "editor.defaultFormatter": "rust-lang.rust-analyzer"
     },
-    "rust-analyzer.cargo.features": ["desktop", "wasm"],
+    "rust-analyzer.cargo.features": "all",
+    "rust-analyzer.cargo.target": "wasm32-unknown-unknown", // It is not possible to get completions for multiple targets at the same time.
     "rust-analyzer.cargo.extraEnv": {
         "RUSTFLAGS": "-Clinker=clang -Clink-arg=-fuse-ld=lld"
     },
