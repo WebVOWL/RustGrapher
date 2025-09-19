@@ -1,8 +1,8 @@
 mod components;
 mod ressources;
 
-use crate::wasm::{
-    quadtree_ecs::{BoundingBox2D, QuadTree},
+use crate::web::{
+    quadtree::{BoundingBox2D, QuadTree},
     simulator::{
         components::{
             edges::Connects,
