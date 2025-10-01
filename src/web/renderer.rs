@@ -29,6 +29,8 @@ struct State {
     vertex_buffer: wgpu::Buffer,
     num_vertices: u32,
     window: Arc<Window>,
+    resolution_buffer: wgpu::Buffer,
+    resolution_bind_group: wgpu::BindGroup,
 }
 
 impl State {
@@ -94,10 +96,48 @@ impl State {
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("./renderer/shader.wgsl"));
 
+        // Create a bind group layout for the resolution uniform
+        let resolution_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("resolution_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        // Create resolution uniform buffer
+        let resolution_data = [size.width as f32, size.height as f32, 0.0f32, 0.0f32];
+        let resolution_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Resolution Buffer"),
+            contents: bytemuck::cast_slice(&resolution_data),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let resolution_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &resolution_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &resolution_buffer,
+                    offset: 0,
+                    size: None,
+                }),
+            }],
+            label: Some("resolution_bind_group"),
+        });
+
+        // Include the bind group layout in the pipeline layout
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[],
+                bind_group_layouts: &[&resolution_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -160,6 +200,8 @@ impl State {
             vertex_buffer,
             num_vertices,
             window,
+            resolution_buffer,
+            resolution_bind_group,
         })
     }
 
@@ -169,6 +211,11 @@ impl State {
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
             self.is_surface_configured = true;
+
+            // update GPU resolution uniform
+            let data = [width as f32, height as f32, 0.0f32, 0.0f32];
+            self.queue
+                .write_buffer(&self.resolution_buffer, 0, bytemuck::cast_slice(&data));
         }
     }
 
@@ -213,6 +260,8 @@ impl State {
             });
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            // bind the resolution uniform group (group 0)
+            render_pass.set_bind_group(0, &self.resolution_bind_group, &[]);
             render_pass.draw(0..self.num_vertices, 0..1);
         }
 
