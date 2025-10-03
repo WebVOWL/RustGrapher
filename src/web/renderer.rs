@@ -16,7 +16,7 @@ use winit::{
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-use vertex_buffer::{VERTICES, Vertex};
+use vertex_buffer::{Instance, VERTICES, Vertex};
 
 // This will store the state of our game
 struct State {
@@ -30,7 +30,12 @@ struct State {
     num_vertices: u32,
     window: Arc<Window>,
     resolution_buffer: wgpu::Buffer,
-    resolution_bind_group: wgpu::BindGroup,
+    // bind group for group(0): binding 0 = resolution uniform only
+    bind_group0: wgpu::BindGroup,
+    // instance buffer with node positions (array<vec2<f32>>), bound as vertex buffer slot 1
+    instance_buffer: wgpu::Buffer,
+    // number of instances (length of node positions)
+    num_instances: u32,
 }
 
 impl State {
@@ -74,9 +79,6 @@ impl State {
             .await?;
 
         let surface_caps = surface.get_capabilities(&adapter);
-        // Shader code in this tutorial assumes an sRGB surface texture. Using a different
-        // one will result in all the colors coming out darker. If you want to support non
-        // sRGB surfaces, you'll need to account for that when drawing to the frame.
         let surface_format = surface_caps
             .formats
             .iter()
@@ -96,20 +98,23 @@ impl State {
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("./renderer/shader.wgsl"));
 
-        // Create a bind group layout for the resolution uniform
+        // Create a bind group layout for group(0): binding 0 = uniform (resolution)
         let resolution_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("resolution_bind_group_layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                entries: &[
+                    // binding 0: resolution uniform (vec4<f32>) used in vertex shader
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
+                ],
             });
 
         // Create resolution uniform buffer
@@ -120,7 +125,25 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let resolution_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let n = 500;
+        let grid_size = (n as f32).sqrt().ceil() as usize;
+        let spacing = 40.0;
+
+        let mut test_positions: Vec<[f32; 2]> = Vec::with_capacity(n);
+
+        for y in 0..grid_size {
+            for x in 0..grid_size {
+                if test_positions.len() >= n {
+                    break;
+                }
+                test_positions.push([x as f32 * spacing, y as f32 * spacing]);
+            }
+        }
+        let instance_buffer = vertex_buffer::create_instance_buffer(&device, &test_positions);
+        let num_instances = test_positions.len() as u32;
+
+        // Create bind group 0 with only the resolution uniform (binding 0)
+        let bind_group0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &resolution_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -130,7 +153,7 @@ impl State {
                     size: None,
                 }),
             }],
-            label: Some("resolution_bind_group"),
+            label: Some("group0_bind_group"),
         });
 
         // Include the bind group layout in the pipeline layout
@@ -147,7 +170,8 @@ impl State {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[Vertex::desc()],
+                // include both the per-vertex quad buffer and the per-instance positions buffer
+                buffers: &[Vertex::desc(), Instance::desc()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -155,7 +179,7 @@ impl State {
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -201,7 +225,9 @@ impl State {
             num_vertices,
             window,
             resolution_buffer,
-            resolution_bind_group,
+            bind_group0,
+            instance_buffer,
+            num_instances,
         })
     }
 
@@ -246,9 +272,9 @@ impl State {
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
+                            r: 0.84,
+                            g: 0.87,
+                            b: 0.88,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -259,10 +285,13 @@ impl State {
                 timestamp_writes: None,
             });
             render_pass.set_pipeline(&self.render_pipeline);
+            // set vertex buffers: slot 0 = quad vertices, slot 1 = per-instance positions
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            // bind the resolution uniform group (group 0)
-            render_pass.set_bind_group(0, &self.resolution_bind_group, &[]);
-            render_pass.draw(0..self.num_vertices, 0..1);
+            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            // bind group 0 contains resolution uniform
+            render_pass.set_bind_group(0, &self.bind_group0, &[]);
+            // draw one quad per node position (instances)
+            render_pass.draw(0..self.num_vertices, 0..self.num_instances);
         }
 
         // submit will accept anything that implements IntoIter

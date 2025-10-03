@@ -1,97 +1,73 @@
-struct VertexInput {
-    @location(0) position: vec3<f32>,
+struct VertIn {
+    @location(0) quad_pos: vec2<f32>, // [-1..1] quad corner in local space
+    @location(1) inst_pos: vec2<f32>, // per-instance node position in pixels
 };
 
-struct VertexOutput {
+struct VertOut {
     @builtin(position) clip_position: vec4<f32>,
+    @location(0) v_uv: vec2<f32>, // 0..1 inside quad
 };
+
+@group(0) @binding(0)
+var<uniform> u_resolution: vec4<f32>; // xy = pixel resolution
+
+// per-instance radius fixed
+const NODE_RADIUS_PIX = 24.0; // pixels
 
 @vertex
 fn vs_main(
-    model: VertexInput,
-) -> VertexOutput {
-    var out: VertexOutput;
-    out.clip_position = vec4<f32>(model.position, 1.0);
+    in: VertIn,
+) -> VertOut {
+    var out: VertOut;
+
+    // fetch node position (in pixel coordinates) from per-instance attribute
+    let pos_px: vec2<f32> = in.inst_pos;
+
+    // quad_pos is [-1..1] so convert to offset in pixels
+    let offset_px = in.quad_pos * vec2(NODE_RADIUS_PIX, NODE_RADIUS_PIX);
+
+    // screen position in pixels
+    let screen = pos_px + offset_px;
+
+    // convert to NDC clip space: x -> [-1,1] left->right, y -> [-1,1] bottom->top
+    let ndc_x = (screen.x / u_resolution.x) * 2.0 - 1.0;
+    let ndc_y = (screen.y / u_resolution.y) * 2.0 - 1.0;
+    out.clip_position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
+
+    // uv 0..1 for circle mask; quad_pos [-1..1] -> uv [0..1]
+    out.v_uv = in.quad_pos * 0.5 + vec2<f32>(0.5, 0.5);
+
     return out;
 }
 
-// Add uniform resolution (using vec4 for 16-byte alignment)
-@group(0) @binding(0)
-var<uniform> u_resolution: vec4<f32>;
-
 @fragment
-fn fs_main(
-    @builtin(position) pos: vec4<f32>,
-) -> @location(0) vec4<f32> {
-    // use the uniform resolution (xy)
-    var st = pos.xy / u_resolution.xy;
-    var aspect = u_resolution.x / u_resolution.y;
+fn fs_main(in: VertOut) -> @location(0) vec4<f32> {
+    // circle distance
+    let d = distance(in.v_uv, vec2<f32>(0.5, 0.5));
+    let r = 0.49;
 
-    // correct aspect correction using u_resolution
-    st.x *= aspect;
+    // parameters
+    let border_thickness = 0.05;   // how thick the border ring is
+    let edge_softness    = 0.05;   // anti-aliasing
 
-    // define nodes in normalized (0..1) space (x will be multiplied by aspect)
-    // (0,0) is defined as top right (left hand rule)
+    // smooth fill mask (circle inside without border)
+    let fill_mask = 1.0 - smoothstep(r - border_thickness, r - border_thickness + edge_softness, d);
 
-    const N = 3;
-    var nodes = array<vec2<f32>, N>();
-    nodes[0] = vec2(0.3 * aspect, 0.7);
-    nodes[1] = vec2(0.5 * aspect, 0.3);
-    nodes[2] = vec2(0.7 * aspect, 0.7);
+    // smooth border mask (ring around circle)
+    let border_mask = smoothstep(r - border_thickness, r - border_thickness + edge_softness, d)
+                    * (1.0 - smoothstep(r, r + edge_softness, d));
 
-    const E = 3;
-    var edges = array<vec2<i32>, E>();
-    edges[0] = vec2(0,1);
-    edges[1] = vec2(1,2);
-    edges[2] = vec2(2,0);
+    // colors
+    let fill_color = vec3<f32>(0.40724, 0.60383, 1.0);
+    let border_color = vec3<f32>(0.0, 0.0, 0.0);
+    let background = vec3<f32>(0.84, 0.87, 0.88);
 
-    // background
-    var color = vec3(0.8387990119, 0.8713671192, 0.8796223963);
+    // blend smoothly: background -> border -> fill
+    var col = mix(background, border_color, border_mask);
+    col = mix(col, fill_color, fill_mask);
 
-    // draw edges
-    const edge_thickness = 0.002; // in aspect-corrected space
-    const edge_aa = 0.001;
-    for (var i = 0; i < E; i++) {
-        var a = nodes[edges[i].x];
-        var b = nodes[edges[i].y];
-        var d = seg_dist(st, a, b);
-        var mask = 1.0 - smoothstep(edge_thickness - edge_aa, edge_thickness + edge_aa, d);
-        color = mix(color, vec3(0.0), mask);
-    }
+    // smooth alpha (fill + border)
+    let alpha = clamp(fill_mask + border_mask, 0.0, 1.0);
 
-    // draw nodes
-    const node_radius = 0.03;
-    const node_edge = 0.002;
-    for (var i = 0; i < N; i++) {
-        var cpos = nodes[i];
-        // fill
-        var m = circle_mask(st, cpos, node_radius, node_edge);
-        // Default node color from WebVOWL
-        color = mix(color, vec3(0.4072402119, 0.6038273389, 1.0), m);
-        // draw border
-        var border = circle_mask(st, cpos, node_radius + node_edge, node_edge * 0.6) - m;
-        color = mix(color, vec3(0.0), max(0.0, border));
-    }
-    
-    return vec4(color, 1.0);
-}
-
-// distance from point p to segment a-b
-fn seg_dist(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
-    var pa = p - a;
-    var ba = b - a;
-    var ba_len2 = dot(ba, ba);
-    // division by zero
-    if ba_len2 == 0.0 {
-        return length(pa);
-    }
-    var h = clamp(dot(pa, ba) / ba_len2, 0.0, 1.0);
-    var projection = a + ba * h;
-    return length(p - projection);
-}
-
-// circle mask centered at c
-fn circle_mask(p: vec2<f32>, c: vec2<f32>, r: f32, edge: f32) -> f32 {
-    var d = length(p - c);
-    return 1.0 - smoothstep(r - edge, r + edge, d);
+    return vec4<f32>(col, alpha);
 }
