@@ -16,9 +16,9 @@ use winit::{
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-use vertex_buffer::{Instance, VERTICES, Vertex};
+use vertex_buffer::{NodeInstance, VERTICES, Vertex};
 
-// This will store the state of our game
+// Store the state of the graph
 struct State {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -36,6 +36,13 @@ struct State {
     instance_buffer: wgpu::Buffer,
     // number of instances (length of node positions)
     num_instances: u32,
+    edge_pipeline: wgpu::RenderPipeline,
+    edge_instance_buffer: wgpu::Buffer,
+    num_edge_instances: u32,
+    // Node and edge coordinates in pixels
+    positions: Vec<[f32; 2]>,
+    edges: Vec<[[f32; 2]; 2]>,
+    frame_count: u64, // TODO: Remove after implementing simulator
 }
 
 impl State {
@@ -96,7 +103,8 @@ impl State {
             desired_maximum_frame_latency: 2,
         };
 
-        let shader = device.create_shader_module(wgpu::include_wgsl!("./renderer/shader.wgsl"));
+        let shader =
+            device.create_shader_module(wgpu::include_wgsl!("./renderer/node_shader.wgsl"));
 
         // Create a bind group layout for group(0): binding 0 = uniform (resolution)
         let resolution_bind_group_layout =
@@ -125,22 +133,10 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let n = 500;
-        let grid_size = (n as f32).sqrt().ceil() as usize;
-        let spacing = 40.0;
-
-        let mut test_positions: Vec<[f32; 2]> = Vec::with_capacity(n);
-
-        for y in 0..grid_size {
-            for x in 0..grid_size {
-                if test_positions.len() >= n {
-                    break;
-                }
-                test_positions.push([x as f32 * spacing, y as f32 * spacing]);
-            }
-        }
-        let instance_buffer = vertex_buffer::create_instance_buffer(&device, &test_positions);
-        let num_instances = test_positions.len() as u32;
+        // TODO: remove test code after adding simulator
+        let positions = [[50.0, 50.0], [100.0, 100.0]];
+        let instance_buffer = vertex_buffer::create_node_instance_buffer(&device, &positions);
+        let num_instances = positions.len() as u32;
 
         // Create bind group 0 with only the resolution uniform (binding 0)
         let bind_group0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -169,14 +165,14 @@ impl State {
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: Some("vs_main"),
+                entry_point: Some("vs_node_main"),
                 // include both the per-vertex quad buffer and the per-instance positions buffer
-                buffers: &[Vertex::desc(), Instance::desc()],
+                buffers: &[Vertex::desc(), NodeInstance::desc()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs_main"),
+                entry_point: Some("fs_node_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -214,6 +210,44 @@ impl State {
 
         let num_vertices = VERTICES.len() as u32;
 
+        // TODO: remove test edges after adding simulator
+        let edges = [[positions[0], positions[1]]];
+        let edge_instance_buffer = vertex_buffer::create_edge_instance_buffer(&device, &edges);
+        let num_edge_instances = edges.len() as u32; // now 1
+
+        let edge_shader =
+            device.create_shader_module(wgpu::include_wgsl!("./renderer/edge_shader.wgsl"));
+        let edge_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Edge Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &edge_shader,
+                entry_point: Some("vs_edge_main"),
+                buffers: &[Vertex::desc(), vertex_buffer::EdgeInstance::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &edge_shader,
+                entry_point: Some("fs_edge_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Cw,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
         Ok(Self {
             surface,
             device,
@@ -228,6 +262,12 @@ impl State {
             bind_group0,
             instance_buffer,
             num_instances,
+            edge_pipeline,
+            edge_instance_buffer,
+            num_edge_instances,
+            positions: positions.to_vec(),
+            edges: edges.to_vec(),
+            frame_count: 0,
         })
     }
 
@@ -284,6 +324,15 @@ impl State {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
+
+            // Draw edges
+            render_pass.set_pipeline(&self.edge_pipeline);
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..)); // quad
+            render_pass.set_vertex_buffer(1, self.edge_instance_buffer.slice(..));
+            render_pass.set_bind_group(0, &self.bind_group0, &[]);
+            render_pass.draw(0..self.num_vertices, 0..self.num_edge_instances);
+
+            // Draw nodes
             render_pass.set_pipeline(&self.render_pipeline);
             // set vertex buffers: slot 0 = quad vertices, slot 1 = per-instance positions
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
@@ -302,7 +351,26 @@ impl State {
     }
 
     fn update(&mut self) {
-        // remove `todo!()`
+        self.frame_count += 1;
+        let t = ((self.frame_count as f32) * 0.05).sin() * 20.0;
+
+        // Update node positions
+        self.positions[1] = [100.0, 100.0 + t];
+
+        // Update edge endpoints from node positions
+        self.edges[0] = [self.positions[0], self.positions[1]];
+
+        self.queue.write_buffer(
+            &self.instance_buffer,
+            0,
+            bytemuck::cast_slice(&self.positions),
+        );
+
+        self.queue.write_buffer(
+            &self.edge_instance_buffer,
+            0,
+            bytemuck::cast_slice(&self.edges),
+        );
     }
 
     fn handle_key(&self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {

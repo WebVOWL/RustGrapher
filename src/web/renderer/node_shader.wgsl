@@ -15,7 +15,7 @@ var<uniform> u_resolution: vec4<f32>; // xy = pixel resolution
 const NODE_RADIUS_PIX = 24.0; // pixels
 
 @vertex
-fn vs_main(
+fn vs_node_main(
     in: VertIn,
 ) -> VertOut {
     var out: VertOut;
@@ -24,7 +24,7 @@ fn vs_main(
     let pos_px: vec2<f32> = in.inst_pos;
 
     // quad_pos is [-1..1] so convert to offset in pixels
-    let offset_px = in.quad_pos * vec2(NODE_RADIUS_PIX, NODE_RADIUS_PIX);
+    let offset_px = in.quad_pos * vec2(NODE_RADIUS_PIX);
 
     // screen position in pixels
     let screen = pos_px + offset_px;
@@ -41,7 +41,7 @@ fn vs_main(
 }
 
 @fragment
-fn fs_main(in: VertOut) -> @location(0) vec4<f32> {
+fn fs_node_main(in: VertOut) -> @location(0) vec4<f32> {
     // circle distance
     let d = distance(in.v_uv, vec2<f32>(0.5, 0.5));
     let r = 0.49;
@@ -71,3 +71,5 @@ fn fs_main(in: VertOut) -> @location(0) vec4<f32> {
 
     return vec4<f32>(col, alpha);
 }
+
+
