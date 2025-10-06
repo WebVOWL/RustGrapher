@@ -20,6 +20,8 @@ use wasm_bindgen::prelude::*;
 
 use vertex_buffer::{NodeInstance, VERTICES, Vertex};
 
+use crate::web::simulator::Simulator;
+
 use crate::web::renderer::node_types::NodeType;
 
 // Store the state of the graph
