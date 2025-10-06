@@ -2,4 +2,5 @@
 pub enum NodeType {
     Class,
     ExternalClass,
+    Thing,
 }

@@ -138,9 +138,9 @@ impl State {
         });
 
         // TODO: remove test code after adding simulator
-        let positions = [[50.0, 50.0], [100.0, 100.0]];
+        let positions = [[50.0, 50.0], [100.0, 100.0], [150.0, 150.0]];
 
-        let node_types = [NodeType::Class, NodeType::ExternalClass];
+        let node_types = [NodeType::Class, NodeType::ExternalClass, NodeType::Thing];
 
         // Combine positions and types into NodeInstance entries
 
@@ -328,6 +328,7 @@ impl State {
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
+                            // Background color
                             r: 0.84,
                             g: 0.87,
                             b: 0.88,

@@ -53,29 +53,69 @@ fn fs_node_main(in: VertOut) -> @location(0) vec4<f32> {
 
     // parameters
     let border_thickness = 0.05;   // how thick the border ring is
-    let edge_softness    = 0.05;   // anti-aliasing
+    let edge_softness    = 0.03;   // anti-aliasing
 
     // smooth fill mask (circle inside without border)
-    let fill_mask = 1.0 - smoothstep(r - border_thickness, r - border_thickness + edge_softness, d);
+    var fill_mask = 1.0 - smoothstep(r - border_thickness, r - border_thickness + edge_softness, d);
 
     // smooth border mask (ring around circle)
-    let border_mask = smoothstep(r - border_thickness, r - border_thickness + edge_softness, d)
+    var border_mask = smoothstep(r - border_thickness, r - border_thickness + edge_softness, d)
                     * (1.0 - smoothstep(r, r + edge_softness, d));
 
     // colors
     var fill_color = vec3<f32>(0.40724, 0.60383, 1.0);
-    if in.node_type == 1 {fill_color = vec3<f32>(0.03189, 0.13286, 0.60382);}
-    let border_color = vec3<f32>(0.0, 0.0, 0.0);
-    let background = vec3<f32>(0.84, 0.87, 0.88);
+    var col: vec3<f32>;
 
-    // blend smoothly: background -> border -> fill
-    var col = mix(background, border_color, border_mask);
-    col = mix(col, fill_color, fill_mask);
+    switch in.node_type {
+        case 1: {
+            fill_color = vec3<f32>(0.03189, 0.13286, 0.60382);
+
+            let border_color = vec3<f32>(0.0, 0.0, 0.0);
+            let background = vec3<f32>(0.84, 0.87, 0.88);
+
+            // blend smoothly: background -> border -> fill
+            col = mix(background, border_color, border_mask);
+            col = mix(col, fill_color, fill_mask);
+        }
+        case 2: {
+            // polar angle based repeating pattern
+            const PI = 3.14159265f;
+            const DOT_COUNT = 14.0f;        // number of dots around the ring
+            const DOT_RADIUS = 0.3f;        // half-width of each dot in pattern-space (0..0.5)
+            const DOT_EDGE = 0.01f;         // softness of dot edges
+
+            let center = vec2(0.5f, 0.5f);
+            let dir = in.v_uv - center;
+            let angle = atan2(dir.y, dir.x);               // -PI..PI
+            let ang01 = angle / (2.0f * PI) + 0.5f;       // 0..1
+            let p = fract(ang01 * DOT_COUNT);             // 0..1 per dot segment
+            let distToDot = abs(p - 0.5f);                // distance from center of dot segment
+            let dot_mask = 1.0f - smoothstep(DOT_RADIUS - DOT_EDGE, DOT_RADIUS + DOT_EDGE, distToDot);
+
+            // apply dot mask to border mask so the ring becomes dotted
+            border_mask *= dot_mask;
+
+            fill_color = vec3<f32>(1.0, 1.0, 1.0);
+
+            let border_color = vec3(0.0f, 0.0f, 0.0f);
+            let background = vec3(0.84f, 0.87f, 0.88f);
+
+            // blend smoothly: background -> border -> fill
+            col = mix(background, border_color, border_mask);
+            col = mix(col, fill_color, fill_mask);
+        }
+        default: {
+            let border_color = vec3<f32>(0.0, 0.0, 0.0);
+            let background = vec3<f32>(0.84, 0.87, 0.88);
+
+            // blend smoothly: background -> border -> fill
+            col = mix(background, border_color, border_mask);
+            col = mix(col, fill_color, fill_mask);
+        }
+    }
 
     // smooth alpha (fill + border)
     let alpha = clamp(fill_mask + border_mask, 0.0, 1.0);
 
     return vec4<f32>(col, alpha);
 }
-
-
