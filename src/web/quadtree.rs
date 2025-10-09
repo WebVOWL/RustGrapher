@@ -1,20 +1,58 @@
-use std::borrow::BorrowMut;
-// use bevy_ecs::prelude::*;
 use glam::Vec2;
+use std::borrow::BorrowMut;
 
 const EPSILON: f32 = 1e-3;
 
-// #[derive(Component)]
-// struct InternalNode {indices: [u32; 4]}
+/// The dimension of the quadtree
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BoundingBox2D {
+    pub center: Vec2,
+    pub width: f32,
+    pub height: f32,
+}
 
-// #[derive(Component)]
-// struct Node {mass: f32, pos: Vec2}
+impl BoundingBox2D {
+    pub fn new(center: Vec2, width: f32, height: f32) -> Self {
+        Self {
+            center,
+            width,
+            height,
+        }
+    }
+    ///
+    pub fn section(&self, loc: &Vec2) -> u8 {
+        let mut section = 0x00;
 
-#[derive(Debug)]
-pub struct QuadTree {
-    pub children: Vec<Node>,
-    pub boundary: BoundingBox2D,
-    pub root: u32,
+        if loc[1] > self.center[1] {
+            section |= 0b10;
+        }
+
+        if loc[0] > self.center[0] {
+            section |= 0b01;
+        }
+
+        section
+    }
+
+    pub fn sub_quadrant(&self, section: u8) -> Self {
+        let mut shift = self.center;
+        if section & 0b01 > 0 {
+            shift[0] += 0.25 * self.width;
+        } else {
+            shift[0] -= 0.25 * self.width;
+        }
+
+        if section & 0b10 > 0 {
+            shift[1] += 0.25 * self.height;
+        } else {
+            shift[1] -= 0.25 * self.height;
+        }
+        Self {
+            center: shift,
+            width: self.width * 0.5,
+            height: self.height * 0.5,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -28,6 +66,45 @@ pub enum Node {
         mass: f32,
         pos: Vec2,
     },
+}
+
+impl Node {
+    fn new_leaf(pos: Vec2, mass: f32) -> Self {
+        Self::Leaf { mass, pos }
+    }
+    fn new_root(pos: Vec2, mass: f32, indices: [u32; 4]) -> Self {
+        Self::Root { indices, mass, pos }
+    }
+    #[allow(dead_code)]
+    pub fn is_leaf(&self) -> bool {
+        matches!(self, Node::Leaf { .. })
+    }
+
+    #[allow(dead_code)]
+    pub fn is_root(&self) -> bool {
+        matches!(self, Node::Root { .. })
+    }
+
+    pub fn position(&self) -> Vec2 {
+        match self {
+            Node::Root { pos, mass, .. } => pos / mass,
+            Node::Leaf { pos, .. } => *pos,
+        }
+    }
+
+    pub fn mass(&self) -> f32 {
+        match self {
+            Node::Root { mass, .. } => *mass,
+            Node::Leaf { mass, .. } => *mass,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct QuadTree {
+    pub children: Vec<Node>,
+    pub boundary: BoundingBox2D,
+    pub root: u32,
 }
 
 impl QuadTree {
@@ -170,88 +247,6 @@ impl QuadTree {
             new_stack = Vec::with_capacity(stack.len() * 4);
         }
         nodes
-    }
-}
-
-impl Node {
-    fn new_leaf(pos: Vec2, mass: f32) -> Self {
-        Self::Leaf { mass, pos }
-    }
-    fn new_root(pos: Vec2, mass: f32, indices: [u32; 4]) -> Self {
-        Self::Root { indices, mass, pos }
-    }
-    #[allow(dead_code)]
-    pub fn is_leaf(&self) -> bool {
-        matches!(self, Node::Leaf { .. })
-    }
-
-    #[allow(dead_code)]
-    pub fn is_root(&self) -> bool {
-        matches!(self, Node::Root { .. })
-    }
-
-    pub fn position(&self) -> Vec2 {
-        match self {
-            Node::Root { pos, mass, .. } => pos / mass,
-            Node::Leaf { pos, .. } => *pos,
-        }
-    }
-
-    pub fn mass(&self) -> f32 {
-        match self {
-            Node::Root { mass, .. } => *mass,
-            Node::Leaf { mass, .. } => *mass,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct BoundingBox2D {
-    pub center: Vec2,
-    pub width: f32,
-    pub height: f32,
-}
-
-impl BoundingBox2D {
-    pub fn new(center: Vec2, width: f32, height: f32) -> Self {
-        Self {
-            center,
-            width,
-            height,
-        }
-    }
-    pub fn section(&self, loc: &Vec2) -> u8 {
-        let mut section = 0x00;
-
-        if loc[1] > self.center[1] {
-            section |= 0b10;
-        }
-
-        if loc[0] > self.center[0] {
-            section |= 0b01;
-        }
-
-        section
-    }
-
-    pub fn sub_quadrant(&self, section: u8) -> Self {
-        let mut shift = self.center;
-        if section & 0b01 > 0 {
-            shift[0] += 0.25 * self.width;
-        } else {
-            shift[0] -= 0.25 * self.width;
-        }
-
-        if section & 0b10 > 0 {
-            shift[1] += 0.25 * self.height;
-        } else {
-            shift[1] -= 0.25 * self.height;
-        }
-        Self {
-            center: shift,
-            width: self.width * 0.5,
-            height: self.height * 0.5,
-        }
     }
 }
 
