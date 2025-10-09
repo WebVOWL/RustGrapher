@@ -24,9 +24,17 @@
 
 [dependencies]
     anyhow="1.0.0"
+    bytemuck={version="1.16.0", features=["derive"]}
     glam="0.29.0"
+    glyphon="0.9.0"
     log="0.4.0"
+    pollster="0.4.0"
     rayon="1.10.0"
+    wgpu={version="25.0.2", default-features=false, features=[
+        "webgl",
+        "static-dxc",
+        "wgsl",
+    ]}
     winit="0.30.0"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
@@ -37,7 +45,6 @@
     rand="0.8.5"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-    bytemuck={version="1.16.0", features=["derive"]}
     console_error_panic_hook="0.1.6"
     console_log="1.0.0"
     wasm-bindgen="0.2.100"
@@ -48,11 +55,6 @@
         # https://docs.rs/web-sys/latest/web_sys/#modules
         features=["Document", "Element", "Window"]
 
-    [dependencies.wgpu]
-        default-features=false
-        features=["std", "wgsl", "parking_lot"]
-        version="26.0.1"
-
     [dependencies.specs]
         default-features=false
         features=["specs-derive", "parallel", "stdweb"]
@@ -60,7 +62,6 @@
         version="0.20.1"
 
 [dev-dependencies]
-    criterion={version="0.5.0", features=["html_reports"]}
     criterion={version="0.5.0", features=["html_reports"]}
     petgraph-gen="0.1.3"
     serde={version="1.0.0", features=["derive"]}
@@ -77,13 +78,6 @@
 [[bench]]
     harness=false
     name="physics_bench"
-
-[features]
-    default=["web"]
-    static=["wgpu/static-dxc"]
-    web=["wgpu/web", "webgpu", "static"]
-    webgl=["wgpu/webgl"]
-    webgpu=["wgpu/webgpu"]
 
 
 # Default profile for devs, fast to compile, okay enough to run
