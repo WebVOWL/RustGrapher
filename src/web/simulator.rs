@@ -22,6 +22,7 @@ use crate::web::{
     },
 };
 use glam::Vec2;
+use log::info;
 use rayon::prelude::*;
 use specs::prelude::*;
 use specs::{
@@ -278,7 +279,7 @@ impl<'a> System<'a> for ApplyNodeForce {
     fn run(&mut self, (forces, mut velocities, masses, delta_time): Self::SystemData) {
         for (force, velocity, mass) in (&forces, &mut velocities, &masses).join() {
             velocity.0 += force.0 / mass.0 * delta_time.0;
-            print!("{0}", velocity.0);
+            info!("{0}", velocity.0);
         }
     }
 }

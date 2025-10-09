@@ -1,7 +1,8 @@
 mod vertex_buffer;
 
+use glam::Vec2;
+use log::info;
 use std::sync::Arc;
-
 use wgpu::util::DeviceExt;
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::EventLoopExtWebSys;
@@ -17,6 +18,8 @@ use winit::{
 use wasm_bindgen::prelude::*;
 
 use vertex_buffer::{NodeInstance, VERTICES, Vertex};
+
+use crate::web::simulator::Simulator;
 
 // Store the state of the graph
 struct State {
@@ -47,6 +50,8 @@ struct State {
 
 impl State {
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
+        info!("Building render state");
+
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
@@ -247,6 +252,14 @@ impl State {
             multiview: None,
             cache: None,
         });
+
+        let sim_nodes = vec![Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0)];
+        let sim_edges = vec![Vec2::new(0.0, 1.0)];
+        let mut simulator = Simulator::builder().build(sim_nodes, sim_edges);
+        for _ in 0..3 {
+            info!("Dispatch");
+            simulator.dispatcher.dispatch(&simulator.world);
+        }
 
         Ok(Self {
             surface,
@@ -518,15 +531,6 @@ impl ApplicationHandler<State> for App {
 }
 
 pub fn run() -> anyhow::Result<()> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        env_logger::init();
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        console_log::init_with_level(log::Level::Info).unwrap_throw();
-    }
-
     let event_loop = EventLoop::with_user_event().build()?;
     let app = App::new(
         #[cfg(target_arch = "wasm32")]
@@ -543,8 +547,8 @@ pub fn run() -> anyhow::Result<()> {
 }
 
 #[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(start)]
-pub fn run_web() -> Result<(), wasm_bindgen::JsValue> {
+#[wasm_bindgen(js_name = initRender)]
+pub fn init_render() -> Result<(), wasm_bindgen::JsValue> {
     console_error_panic_hook::set_once();
     run().unwrap_throw();
 
