@@ -1,4 +1,5 @@
 use glam::Vec2;
+use grapher::web::run;
 use grapher::web::simulator::Simulator;
 
 fn build_graph() -> (Vec<Vec2>, Vec<Vec2>) {
@@ -7,10 +8,15 @@ fn build_graph() -> (Vec<Vec2>, Vec<Vec2>) {
     (nodes, edges)
 }
 
-fn main() {
+fn sim() {
     let (nodes, edges) = build_graph();
     let mut simulator = Simulator::builder().build(nodes, edges);
     for _ in 0..3 {
         simulator.dispatcher.dispatch(&simulator.world);
     }
+}
+
+fn main() {
+    env_logger::init();
+    run();
 }
