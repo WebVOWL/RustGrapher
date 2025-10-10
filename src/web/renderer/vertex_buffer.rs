@@ -1,4 +1,6 @@
-use wgpu::util::DeviceExt; // for create_buffer_init
+use wgpu::util::DeviceExt;
+
+use crate::web::renderer::node_types::NodeType;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -48,11 +50,13 @@ pub const VERTICES: &[Vertex] = &[
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct NodeInstance {
     pub position: [f32; 2],
+    pub node_type: u32,
 }
 
 impl NodeInstance {
-    // location 1 -> Float32x2, instance step mode
-    const ATTRIBS: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![1 => Float32x2];
+    // locations 1 -> Float32x2, 2 -> Uint32 (node_type)
+    const ATTRIBS: [wgpu::VertexAttribute; 2] =
+        wgpu::vertex_attr_array![1 => Float32x2, 2 => Uint32];
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         use std::mem;
@@ -65,11 +69,23 @@ impl NodeInstance {
 }
 
 /// Create an instance vertex buffer containing node positions.
-pub fn create_node_instance_buffer(device: &wgpu::Device, positions: &[[f32; 2]]) -> wgpu::Buffer {
+pub fn create_node_instance_buffer(
+    device: &wgpu::Device,
+    positions: &[[f32; 2]],
+    node_types: &[NodeType],
+) -> wgpu::Buffer {
+    let nodes: Vec<NodeInstance> = positions
+        .iter()
+        .zip(node_types.iter())
+        .map(|(pos, ty)| NodeInstance {
+            position: *pos,
+            node_type: *ty as u32,
+        })
+        .collect();
     // positions are stored as contiguous vec2<f32> matching Instance.position
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("instance_node_positions_buffer"),
-        contents: bytemuck::cast_slice(positions),
+        label: Some("instance_node_buffer"),
+        contents: bytemuck::cast_slice(&nodes),
         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
     })
 }

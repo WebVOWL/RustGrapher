@@ -1,3 +1,4 @@
+mod node_types;
 mod vertex_buffer;
 
 use glam::Vec2;
@@ -19,7 +20,7 @@ use wasm_bindgen::prelude::*;
 
 use vertex_buffer::{NodeInstance, VERTICES, Vertex};
 
-use crate::web::simulator::Simulator;
+use crate::web::renderer::node_types::NodeType;
 
 // Store the state of the graph
 struct State {
@@ -36,7 +37,7 @@ struct State {
     // bind group for group(0): binding 0 = resolution uniform only
     bind_group0: wgpu::BindGroup,
     // instance buffer with node positions (array<vec2<f32>>), bound as vertex buffer slot 1
-    instance_buffer: wgpu::Buffer,
+    node_instance_buffer: wgpu::Buffer,
     // number of instances (length of node positions)
     num_instances: u32,
     edge_pipeline: wgpu::RenderPipeline,
@@ -44,7 +45,8 @@ struct State {
     num_edge_instances: u32,
     // Node and edge coordinates in pixels
     positions: Vec<[f32; 2]>,
-    edges: Vec<[[f32; 2]; 2]>,
+    edges: Vec<[usize; 2]>,
+    node_types: Vec<NodeType>,
     frame_count: u64, // TODO: Remove after implementing simulator
 }
 
@@ -139,8 +141,14 @@ impl State {
         });
 
         // TODO: remove test code after adding simulator
-        let positions = [[50.0, 50.0], [100.0, 100.0]];
-        let instance_buffer = vertex_buffer::create_node_instance_buffer(&device, &positions);
+        let positions = [[50.0, 50.0], [100.0, 100.0], [150.0, 150.0]];
+
+        let node_types = [NodeType::Class, NodeType::ExternalClass, NodeType::Thing];
+
+        // Combine positions and types into NodeInstance entries
+
+        let node_instance_buffer =
+            vertex_buffer::create_node_instance_buffer(&device, &positions, &node_types);
         let num_instances = positions.len() as u32;
 
         // Create bind group 0 with only the resolution uniform (binding 0)
@@ -216,9 +224,14 @@ impl State {
         let num_vertices = VERTICES.len() as u32;
 
         // TODO: remove test edges after adding simulator
-        let edges = [[positions[0], positions[1]]];
-        let edge_instance_buffer = vertex_buffer::create_edge_instance_buffer(&device, &edges);
-        let num_edge_instances = edges.len() as u32; // now 1
+        let edges = [[0, 1]];
+        let mut edge_positions: Vec<[[f32; 2]; 2]> = vec![];
+        for edge in edges {
+            edge_positions.push([positions[edge[0]], positions[edge[1]]]);
+        }
+        let edge_instance_buffer =
+            vertex_buffer::create_edge_instance_buffer(&device, &edge_positions);
+        let num_edge_instances = edges.len() as u32;
 
         let edge_shader =
             device.create_shader_module(wgpu::include_wgsl!("./renderer/edge_shader.wgsl"));
@@ -273,13 +286,14 @@ impl State {
             window,
             resolution_buffer,
             bind_group0,
-            instance_buffer,
+            node_instance_buffer,
             num_instances,
             edge_pipeline,
             edge_instance_buffer,
             num_edge_instances,
             positions: positions.to_vec(),
             edges: edges.to_vec(),
+            node_types: node_types.to_vec(),
             frame_count: 0,
         })
     }
@@ -325,6 +339,7 @@ impl State {
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
+                            // Background color
                             r: 0.84,
                             g: 0.87,
                             b: 0.88,
@@ -349,7 +364,7 @@ impl State {
             render_pass.set_pipeline(&self.render_pipeline);
             // set vertex buffers: slot 0 = quad vertices, slot 1 = per-instance positions
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            render_pass.set_vertex_buffer(1, self.node_instance_buffer.slice(..));
             // bind group 0 contains resolution uniform
             render_pass.set_bind_group(0, &self.bind_group0, &[]);
             // draw one quad per node position (instances)
@@ -370,20 +385,30 @@ impl State {
         // Update node positions
         self.positions[1] = [100.0, 100.0 + t];
 
-        // Update edge endpoints from node positions
-        self.edges[0] = [self.positions[0], self.positions[1]];
+        let nodes: Vec<NodeInstance> = self
+            .positions
+            .iter()
+            .zip(self.node_types.iter())
+            .map(|(pos, ty)| NodeInstance {
+                position: *pos,
+                node_type: *ty as u32,
+            })
+            .collect();
 
-        self.queue.write_buffer(
-            &self.instance_buffer,
-            0,
-            bytemuck::cast_slice(&self.positions),
-        );
+        let mut edge_positions: Vec<[[f32; 2]; 2]> = vec![];
+        // Update edge endpoints from node positions
+        for edge in &mut self.edges {
+            edge_positions.push([self.positions[edge[0]], self.positions[edge[1]]]);
+        }
 
         self.queue.write_buffer(
             &self.edge_instance_buffer,
             0,
-            bytemuck::cast_slice(&self.edges),
+            bytemuck::cast_slice(&edge_positions),
         );
+
+        self.queue
+            .write_buffer(&self.node_instance_buffer, 0, bytemuck::cast_slice(&nodes));
     }
 
     fn handle_key(&self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
