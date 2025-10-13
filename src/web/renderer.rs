@@ -303,14 +303,6 @@ impl State {
             simulator.dispatcher.dispatch(&simulator.world);
         }
 
-        let sim_nodes = vec![Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0)];
-        let sim_edges = vec![Vec2::new(0.0, 1.0)];
-        let mut simulator = Simulator::builder().build(sim_nodes, sim_edges);
-        for _ in 0..3 {
-            info!("Dispatch");
-            simulator.dispatcher.dispatch(&simulator.world);
-        }
-
         // Glyphon: do not create heavy glyphon resources unless we have a non-zero surface.
         // Initialize them lazily below (or on first resize).
         let font_system = None;
