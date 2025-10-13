@@ -16,7 +16,7 @@ struct VertOut {
 var<uniform> u_resolution: vec4<f32>; // xy = pixel resolution
 
 // per-instance radius fixed
-const NODE_RADIUS_PIX = 24.0; // pixels
+const NODE_RADIUS_PIX = 48.0; // pixels
 
 @vertex
 fn vs_node_main(

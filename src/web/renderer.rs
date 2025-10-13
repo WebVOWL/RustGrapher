@@ -163,7 +163,7 @@ impl State {
         });
 
         // TODO: remove test code after adding simulator
-        let positions = [[50.0, 50.0], [100.0, 100.0], [150.0, 150.0]];
+        let positions = [[50.0, 50.0], [250.0, 250.0], [450.0, 450.0]];
 
         let node_types = [NodeType::Class, NodeType::ExternalClass, NodeType::Thing];
 
@@ -384,19 +384,30 @@ impl State {
 
         let cache = Cache::new(&self.device);
         let viewport = Viewport::new(&self.device, &cache);
-        let mut atlas = TextAtlas::new(&self.device, &self.queue, &cache, self.config.format);
+
+        let mut atlas = TextAtlas::new(
+            &self.device,
+            &self.queue,
+            &cache,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        );
         let text_renderer = TextRenderer::new(
             &mut atlas,
             &self.device,
             wgpu::MultisampleState::default(),
             None,
         );
-
+        let scale = self.window.scale_factor() as f32;
         let mut text_buffers: Vec<GlyphBuffer> = Vec::new();
         for ty in self.node_types.iter() {
-            let mut buf = GlyphBuffer::new(&mut font_system, Metrics::new(24.0, 28.0));
+            let font_px = 12.0 * scale; // font size in physical pixels
+            let line_px = 28.0 * scale;
+            let mut buf = GlyphBuffer::new(&mut font_system, Metrics::new(font_px, line_px));
             // per-label size (in physical pixels)
-            buf.set_size(&mut font_system, Some(200.0), Some(50.0));
+            // TODO: update if we implement dynamic node size
+            let label_width = 96.0 * scale;
+            let label_height = 96.0 * scale;
+            buf.set_size(&mut font_system, Some(label_width), Some(label_height));
             // sample label using the NodeType
             let label = match ty {
                 NodeType::Class => "Class",
@@ -463,29 +474,29 @@ impl State {
             self.text_renderer.as_mut(),
             self.text_buffers.as_ref(),
         ) {
-            // Update glyphon viewport and prepare text rendering before starting the render pass
-            viewport.update(
-                &self.queue,
-                Resolution {
-                    width: self.config.width,
-                    height: self.config.height,
-                },
-            );
+            let scale = self.window.scale_factor() as f32;
+            // physical viewport height in pixels:
+            let vp_h_px = self.config.height as f32 * scale as f32;
+            let vp_w_px = self.config.width as f32 * scale as f32;
 
-            // Build TextArea list for all node labels (positioned at node coordinates)
-            // Build TextArea list for all node labels (positioned at node coordinates)
             let mut areas: Vec<TextArea> = Vec::new();
             for (i, buf) in text_buffers.iter().enumerate() {
-                let node_x = self.positions[i][0];
-                let node_y = self.positions[i][1];
+                // node logical coords
+                let node_logical = self.positions[i];
 
-                // Convert node Y (bottom-left origin) -> glyphon top-based Y
-                let label_width = 200.0f32;
-                let label_height = 50.0f32; // must match buf.set_size(...)
+                // convert node coords to physical pixels
+                let node_x_px = node_logical[0] * scale;
+                let node_y_px = vp_h_px - node_logical[1] * scale;
 
-                // position so label is centered horizontally at node_x and vertically centered on the node
-                let left = node_x - (label_width * 0.5);
-                let top = (self.config.height as f32) - node_y - (label_height * 0.5);
+                let (label_w_opt, label_h_opt) = buf.size();
+                let label_w = label_w_opt.unwrap_or(100.0) as f32;
+                let label_h = label_h_opt.unwrap_or(24.0) as f32;
+
+                // center horizontally on node
+                let left = node_x_px - label_w * 0.5;
+
+                // top = distance-from-top-in-physical-pixels
+                let top = node_y_px - label_h * 0.5;
 
                 areas.push(TextArea {
                     buffer: buf,
@@ -493,17 +504,24 @@ impl State {
                     top,
                     scale: 1.0,
                     bounds: TextBounds {
-                        left: 0,
-                        top: 0,
-                        right: label_width as i32,
-                        bottom: label_height as i32,
+                        left: left as i32,
+                        top: top as i32,
+                        right: (left + label_w) as i32,
+                        bottom: (top + label_h) as i32,
                     },
                     default_color: Color::rgb(0, 0, 0),
                     custom_glyphs: &[],
                 });
             }
 
-            // prepare glyphon
+            viewport.update(
+                &self.queue,
+                Resolution {
+                    width: vp_w_px as u32,
+                    height: vp_h_px as u32,
+                },
+            );
+            // Prepare glyphon for rendering
             if let Err(e) = text_renderer.prepare(
                 &self.device,
                 &self.queue,
@@ -585,162 +603,37 @@ impl State {
         Ok(())
     }
 
-    // TEMP: Simple Glyphon text render test
-    pub fn render_test(&mut self) {
-        use glyphon::{
-            Attrs, Buffer as GlyphBuffer, Color, Family, FontSystem, Metrics, Shaping, SwashCache,
-            TextArea, TextAtlas, TextBounds, TextRenderer,
-        };
-        use wgpu::TextureFormat;
+    fn update(&mut self) {
+        self.frame_count += 1;
+        let t = ((self.frame_count as f32) * 0.05).sin() * 20.0;
 
-        // Acquire swapchain texture
-        let output = match self.surface.get_current_texture() {
-            Ok(o) => o,
-            Err(_) => {
-                self.surface.configure(&self.device, &self.config);
-                self.surface
-                    .get_current_texture()
-                    .expect("Failed to acquire next swap chain texture!")
-            }
-        };
-        let view = output
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        // Update node positions
+        self.positions[1] = [100.0, 100.0 + t];
 
-        // === Glyphon setup ===
-        const DEFAULT_FONT_BYTES: &'static [u8] = include_bytes!("../../assets/DejaVuSans.ttf");
-        log::info!("Font size: {} bytes", DEFAULT_FONT_BYTES.len());
-        let mut font_system = FontSystem::new_with_fonts(core::iter::once(
-            glyphon::fontdb::Source::Binary(Arc::new(DEFAULT_FONT_BYTES.to_vec())),
-        ));
-        // Create both kinds of caches: glyph atlas cache and swash shaping cache
-        let cache = glyphon::Cache::new(&self.device);
-        let mut swash_cache = SwashCache::new();
+        let nodes: Vec<NodeInstance> = self
+            .positions
+            .iter()
+            .zip(self.node_types.iter())
+            .map(|(pos, ty)| NodeInstance {
+                position: *pos,
+                node_type: *ty as u32,
+            })
+            .collect();
 
-        // Ensure non-sRGB format for atlas
-        let text_format = match self.config.format {
-            TextureFormat::Bgra8UnormSrgb => TextureFormat::Bgra8Unorm,
-            TextureFormat::Rgba8UnormSrgb => TextureFormat::Rgba8Unorm,
-            other => other,
-        };
-
-        let mut atlas = TextAtlas::new(&self.device, &self.queue, &cache, text_format);
-        let mut text_renderer = TextRenderer::new(
-            &mut atlas,
-            &self.device,
-            wgpu::MultisampleState::default(),
-            None,
-        );
-
-        // Create a text buffer
-        let mut buf = GlyphBuffer::new(&mut font_system, Metrics::new(24.0, 28.0));
-        buf.set_size(&mut font_system, Some(100.0), Some(1500.0));
-        buf.set_text(
-            &mut font_system,
-            "Hello Glyphon!",
-            &Attrs::new().family(Family::SansSerif),
-            Shaping::Advanced,
-        );
-        buf.shape_until_scroll(&mut font_system, false);
-
-        let area = TextArea {
-            buffer: &buf,
-            left: 100.0,
-            top: 100.0,
-            scale: 1.0,
-            bounds: TextBounds {
-                left: 0,
-                top: 0,
-                right: 300,
-                bottom: 100,
-            },
-            default_color: Color::rgb(255, 0, 0), // bright red
-            custom_glyphs: &[],
-        };
-
-        // Create a viewport required by TextRenderer::prepare/render
-        let viewport = glyphon::Viewport::new(&self.device, &cache);
-
-        // Prepare text using the viewport and swash cache
-        text_renderer
-            .prepare(
-                &self.device,
-                &self.queue,
-                &mut font_system,
-                &mut atlas,
-                &viewport,
-                std::iter::once(area),
-                &mut swash_cache,
-            )
-            .unwrap();
-
-        // Create encoder + pass
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Glyphon Test Encoder"),
-            });
-
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Glyphon Test Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.9,
-                            g: 0.9,
-                            b: 0.9,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-
-            // Pass the actual viewport reference instead of None
-            text_renderer.render(&atlas, &viewport, &mut pass).unwrap();
+        let mut edge_positions: Vec<[[f32; 2]; 2]> = vec![];
+        // Update edge endpoints from node positions
+        for edge in &mut self.edges {
+            edge_positions.push([self.positions[edge[0]], self.positions[edge[1]]]);
         }
 
-        self.queue.submit(Some(encoder.finish()));
-        output.present();
-    }
+        self.queue.write_buffer(
+            &self.edge_instance_buffer,
+            0,
+            bytemuck::cast_slice(&edge_positions),
+        );
 
-    fn update(&mut self) {
-        // self.frame_count += 1;
-        // let t = ((self.frame_count as f32) * 0.05).sin() * 20.0;
-
-        // // Update node positions
-        // self.positions[1] = [100.0, 100.0 + t];
-
-        // let nodes: Vec<NodeInstance> = self
-        //     .positions
-        //     .iter()
-        //     .zip(self.node_types.iter())
-        //     .map(|(pos, ty)| NodeInstance {
-        //         position: *pos,
-        //         node_type: *ty as u32,
-        //     })
-        //     .collect();
-
-        // let mut edge_positions: Vec<[[f32; 2]; 2]> = vec![];
-        // // Update edge endpoints from node positions
-        // for edge in &mut self.edges {
-        //     edge_positions.push([self.positions[edge[0]], self.positions[edge[1]]]);
-        // }
-
-        // self.queue.write_buffer(
-        //     &self.edge_instance_buffer,
-        //     0,
-        //     bytemuck::cast_slice(&edge_positions),
-        // );
-
-        // self.queue
-        //     .write_buffer(&self.node_instance_buffer, 0, bytemuck::cast_slice(&nodes));
+        self.queue
+            .write_buffer(&self.node_instance_buffer, 0, bytemuck::cast_slice(&nodes));
     }
 
     fn handle_key(&self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
