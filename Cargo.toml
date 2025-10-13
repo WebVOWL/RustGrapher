@@ -50,15 +50,7 @@
 
     [dependencies.wgpu]
         default-features=false
-        features=[
-            "webgl",
-            "static-dxc",
-            "web",
-            "std",
-            "wgsl",
-            "parking_lot",
-            # webgpu # when API is stable
-        ]
+        features=["std", "wgsl", "parking_lot"]
         version="26.0.1"
 
     [dependencies.specs]
@@ -81,9 +73,12 @@
     harness=false
     name="physics_bench"
 
-[lints.clippy]
-    derivable_impls="allow"
-    new_without_default="allow"
+[features]
+    default=["web"]
+    static=["wgpu/static-dxc"]
+    web=["wgpu/web", "webgpu", "static"]
+    webgl=["wgpu/webgl"]
+    webgpu=["wgpu/webgpu"]
 
 
 # Default profile for devs, fast to compile, okay enough to run
