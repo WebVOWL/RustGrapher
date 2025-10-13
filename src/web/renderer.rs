@@ -1,3 +1,4 @@
+mod node_types;
 mod vertex_buffer;
 
 use glam::Vec2;
@@ -21,7 +22,13 @@ use vertex_buffer::{NodeInstance, VERTICES, Vertex};
 
 use crate::web::simulator::Simulator;
 
-// Store the state of the graph
+use crate::web::renderer::node_types::NodeType;
+
+use glyphon::{
+    Attrs, Buffer as GlyphBuffer, Cache, Color, Family, FontSystem, Metrics, Resolution, Shaping,
+    SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
+};
+
 struct State {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -31,12 +38,11 @@ struct State {
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     num_vertices: u32,
-    window: Arc<Window>,
     resolution_buffer: wgpu::Buffer,
     // bind group for group(0): binding 0 = resolution uniform only
     bind_group0: wgpu::BindGroup,
     // instance buffer with node positions (array<vec2<f32>>), bound as vertex buffer slot 1
-    instance_buffer: wgpu::Buffer,
+    node_instance_buffer: wgpu::Buffer,
     // number of instances (length of node positions)
     num_instances: u32,
     edge_pipeline: wgpu::RenderPipeline,
@@ -44,8 +50,19 @@ struct State {
     num_edge_instances: u32,
     // Node and edge coordinates in pixels
     positions: Vec<[f32; 2]>,
-    edges: Vec<[[f32; 2]; 2]>,
+    edges: Vec<[usize; 2]>,
+    node_types: Vec<NodeType>,
     frame_count: u64, // TODO: Remove after implementing simulator
+
+    // Glyphon resources are initialized lazily when we have a non-zero surface.
+    font_system: Option<FontSystem>,
+    swash_cache: Option<SwashCache>,
+    viewport: Option<Viewport>,
+    atlas: Option<TextAtlas>,
+    text_renderer: Option<TextRenderer>,
+    // one glyphon buffer per node containing its text (created when glyphon is initialized)
+    text_buffers: Option<Vec<GlyphBuffer>>,
+    window: Arc<Window>,
 }
 
 impl State {
@@ -57,8 +74,6 @@ impl State {
         // The instance is a handle to our GPU
         // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            #[cfg(not(target_arch = "wasm32"))]
-            backends: wgpu::Backends::PRIMARY,
             #[cfg(target_arch = "wasm32")]
             backends: wgpu::Backends::GL,
             ..Default::default()
@@ -87,6 +102,7 @@ impl State {
                 },
                 memory_hints: Default::default(),
                 trace: wgpu::Trace::Off,
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
             })
             .await?;
 
@@ -107,6 +123,15 @@ impl State {
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
+
+        // Always configure surface, even if size is zero
+        let mut config = config;
+        if size.width == 0 || size.height == 0 {
+            config.width = 1;
+            config.height = 1;
+        }
+        surface.configure(&device, &config);
+        let surface_configured = true;
 
         let shader =
             device.create_shader_module(wgpu::include_wgsl!("./renderer/node_shader.wgsl"));
@@ -139,8 +164,14 @@ impl State {
         });
 
         // TODO: remove test code after adding simulator
-        let positions = [[50.0, 50.0], [100.0, 100.0]];
-        let instance_buffer = vertex_buffer::create_node_instance_buffer(&device, &positions);
+        let positions = [[50.0, 50.0], [250.0, 250.0], [450.0, 450.0]];
+
+        let node_types = [NodeType::Class, NodeType::ExternalClass, NodeType::Thing];
+
+        // Combine positions and types into NodeInstance entries
+
+        let node_instance_buffer =
+            vertex_buffer::create_node_instance_buffer(&device, &positions, &node_types);
         let num_instances = positions.len() as u32;
 
         // Create bind group 0 with only the resolution uniform (binding 0)
@@ -216,9 +247,14 @@ impl State {
         let num_vertices = VERTICES.len() as u32;
 
         // TODO: remove test edges after adding simulator
-        let edges = [[positions[0], positions[1]]];
-        let edge_instance_buffer = vertex_buffer::create_edge_instance_buffer(&device, &edges);
-        let num_edge_instances = edges.len() as u32; // now 1
+        let edges = [[0, 1]];
+        let mut edge_positions: Vec<[[f32; 2]; 2]> = vec![];
+        for edge in edges {
+            edge_positions.push([positions[edge[0]], positions[edge[1]]]);
+        }
+        let edge_instance_buffer =
+            vertex_buffer::create_edge_instance_buffer(&device, &edge_positions);
+        let num_edge_instances = edges.len() as u32;
 
         let edge_shader =
             device.create_shader_module(wgpu::include_wgsl!("./renderer/edge_shader.wgsl"));
@@ -261,27 +297,140 @@ impl State {
             simulator.dispatcher.dispatch(&simulator.world);
         }
 
-        Ok(Self {
+        let sim_nodes = vec![Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0)];
+        let sim_edges = vec![Vec2::new(0.0, 1.0)];
+        let mut simulator = Simulator::builder().build(sim_nodes, sim_edges);
+        for _ in 0..3 {
+            info!("Dispatch");
+            simulator.dispatcher.dispatch(&simulator.world);
+        }
+
+        // Glyphon: do not create heavy glyphon resources unless we have a non-zero surface.
+        // Initialize them lazily below (or on first resize).
+        let font_system = None;
+        let swash_cache = None;
+        let viewport = None;
+        let atlas = None;
+        let text_renderer = None;
+        let text_buffers = None;
+
+        // Create one text buffer per node with sample labels
+        // text_buffers are created when glyphon is initialized (lazy).
+
+        // If the surface is already configured (non-zero initial size), initialize glyphon now.
+        // Helper below will create FontSystem, SwashCache, Viewport, TextAtlas, TextRenderer and buffers.
+
+        let mut state = Self {
             surface,
             device,
             queue,
             config,
-            is_surface_configured: false,
+            is_surface_configured: surface_configured,
             render_pipeline,
             vertex_buffer,
             num_vertices,
-            window,
             resolution_buffer,
             bind_group0,
-            instance_buffer,
+            node_instance_buffer,
             num_instances,
             edge_pipeline,
             edge_instance_buffer,
             num_edge_instances,
             positions: positions.to_vec(),
             edges: edges.to_vec(),
+            node_types: node_types.to_vec(),
             frame_count: 0,
-        })
+            font_system,
+            swash_cache,
+            viewport,
+            atlas,
+            text_renderer,
+            text_buffers,
+            window,
+        };
+
+        if surface_configured {
+            state.init_glyphon();
+            let num_buffers = state.text_buffers.as_ref().map(|b| b.len()).unwrap_or(0);
+            log::info!("Glyphon initialized: {} text buffers", num_buffers);
+            if let Some(text_buffers) = state.text_buffers.as_ref() {
+                for (i, buf) in text_buffers.iter().enumerate() {
+                    log::info!(
+                        "Buffer {} has {} glyphs",
+                        i,
+                        buf.layout_runs().map(|r| r.glyphs.len()).sum::<usize>()
+                    );
+                }
+            }
+        }
+
+        Ok(state)
+    }
+
+    // Initialize glyphon resources and create one text buffer per node.
+    fn init_glyphon(&mut self) {
+        if self.font_system.is_some() {
+            return; // already initialized
+        }
+
+        // Embed font bytes into the binary
+        const DEFAULT_FONT_BYTES: &'static [u8] = include_bytes!("../../assets/DejaVuSans.ttf");
+        log::info!("Font size: {} bytes", DEFAULT_FONT_BYTES.len());
+
+        let mut font_system = FontSystem::new_with_fonts(core::iter::once(
+            glyphon::fontdb::Source::Binary(Arc::new(DEFAULT_FONT_BYTES.to_vec())),
+        ));
+        font_system.db_mut().set_sans_serif_family("DejaVu Sans");
+        let swash_cache = SwashCache::new();
+
+        let cache = Cache::new(&self.device);
+        let viewport = Viewport::new(&self.device, &cache);
+
+        let mut atlas = TextAtlas::new(
+            &self.device,
+            &self.queue,
+            &cache,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        );
+        let text_renderer = TextRenderer::new(
+            &mut atlas,
+            &self.device,
+            wgpu::MultisampleState::default(),
+            None,
+        );
+        let scale = self.window.scale_factor() as f32;
+        let mut text_buffers: Vec<GlyphBuffer> = Vec::new();
+        for ty in self.node_types.iter() {
+            let font_px = 12.0 * scale; // font size in physical pixels
+            let line_px = 28.0 * scale;
+            let mut buf = GlyphBuffer::new(&mut font_system, Metrics::new(font_px, line_px));
+            // per-label size (in physical pixels)
+            // TODO: update if we implement dynamic node size
+            let label_width = 96.0 * scale;
+            let label_height = 96.0 * scale;
+            buf.set_size(&mut font_system, Some(label_width), Some(label_height));
+            // sample label using the NodeType
+            let label = match ty {
+                NodeType::Class => "Class",
+                NodeType::ExternalClass => "External",
+                NodeType::Thing => "Thing",
+            };
+            buf.set_text(
+                &mut font_system,
+                &label,
+                &Attrs::new().family(Family::SansSerif),
+                Shaping::Advanced,
+            );
+            buf.shape_until_scroll(&mut font_system, false);
+            text_buffers.push(buf);
+        }
+
+        self.font_system = Some(font_system);
+        self.swash_cache = Some(swash_cache);
+        self.viewport = Some(viewport);
+        self.atlas = Some(atlas);
+        self.text_renderer = Some(text_renderer);
+        self.text_buffers = Some(text_buffers);
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -290,6 +439,11 @@ impl State {
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
             self.is_surface_configured = true;
+
+            // Initialize glyphon now if not already done.
+            if self.font_system.is_none() {
+                self.init_glyphon();
+            }
 
             // update GPU resolution uniform
             let data = [width as f32, height as f32, 0.0f32, 0.0f32];
@@ -301,9 +455,85 @@ impl State {
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         self.window.request_redraw();
 
-        // We can't render unless the surface is configured
         if !self.is_surface_configured {
             return Ok(());
+        }
+
+        // If glyphon isn't initialized yet, skip text rendering for now.
+        if let (
+            Some(font_system),
+            Some(swash_cache),
+            Some(viewport),
+            Some(atlas),
+            Some(text_renderer),
+            Some(text_buffers),
+        ) = (
+            self.font_system.as_mut(),
+            self.swash_cache.as_mut(),
+            self.viewport.as_mut(),
+            self.atlas.as_mut(),
+            self.text_renderer.as_mut(),
+            self.text_buffers.as_ref(),
+        ) {
+            let scale = self.window.scale_factor() as f32;
+            // physical viewport height in pixels:
+            let vp_h_px = self.config.height as f32 * scale as f32;
+            let vp_w_px = self.config.width as f32 * scale as f32;
+
+            let mut areas: Vec<TextArea> = Vec::new();
+            for (i, buf) in text_buffers.iter().enumerate() {
+                // node logical coords
+                let node_logical = self.positions[i];
+
+                // convert node coords to physical pixels
+                let node_x_px = node_logical[0] * scale;
+                let node_y_px = vp_h_px - node_logical[1] * scale;
+
+                let (label_w_opt, label_h_opt) = buf.size();
+                let label_w = label_w_opt.unwrap_or(100.0) as f32;
+                let label_h = label_h_opt.unwrap_or(24.0) as f32;
+
+                // center horizontally on node
+                let left = node_x_px - label_w * 0.5;
+
+                // top = distance-from-top-in-physical-pixels
+                let top = node_y_px - label_h * 0.5;
+
+                areas.push(TextArea {
+                    buffer: buf,
+                    left,
+                    top,
+                    scale: 1.0,
+                    bounds: TextBounds {
+                        left: left as i32,
+                        top: top as i32,
+                        right: (left + label_w) as i32,
+                        bottom: (top + label_h) as i32,
+                    },
+                    default_color: Color::rgb(0, 0, 0),
+                    custom_glyphs: &[],
+                });
+            }
+
+            viewport.update(
+                &self.queue,
+                Resolution {
+                    width: vp_w_px as u32,
+                    height: vp_h_px as u32,
+                },
+            );
+            // Prepare glyphon for rendering
+            if let Err(e) = text_renderer.prepare(
+                &self.device,
+                &self.queue,
+                font_system,
+                atlas,
+                viewport,
+                areas,
+                swash_cache,
+            ) {
+                log::error!("glyphon prepare failed: {:?}", e);
+            }
         }
 
         let output = self.surface.get_current_texture()?;
@@ -322,9 +552,9 @@ impl State {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
-                    depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
+                            // Background color
                             r: 0.84,
                             g: 0.87,
                             b: 0.88,
@@ -332,6 +562,7 @@ impl State {
                         }),
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 occlusion_query_set: None,
@@ -349,11 +580,22 @@ impl State {
             render_pass.set_pipeline(&self.render_pipeline);
             // set vertex buffers: slot 0 = quad vertices, slot 1 = per-instance positions
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            render_pass.set_vertex_buffer(1, self.node_instance_buffer.slice(..));
             // bind group 0 contains resolution uniform
             render_pass.set_bind_group(0, &self.bind_group0, &[]);
             // draw one quad per node position (instances)
             render_pass.draw(0..self.num_vertices, 0..self.num_instances);
+
+            // Render glyphon text on top of nodes if initialized
+            if let (Some(atlas), Some(viewport), Some(text_renderer)) = (
+                self.atlas.as_mut(),
+                self.viewport.as_ref(),
+                self.text_renderer.as_mut(),
+            ) {
+                text_renderer
+                    .render(atlas, viewport, &mut render_pass)
+                    .unwrap();
+            }
         }
 
         // submit will accept anything that implements IntoIter
@@ -370,20 +612,30 @@ impl State {
         // Update node positions
         self.positions[1] = [100.0, 100.0 + t];
 
-        // Update edge endpoints from node positions
-        self.edges[0] = [self.positions[0], self.positions[1]];
+        let nodes: Vec<NodeInstance> = self
+            .positions
+            .iter()
+            .zip(self.node_types.iter())
+            .map(|(pos, ty)| NodeInstance {
+                position: *pos,
+                node_type: *ty as u32,
+            })
+            .collect();
 
-        self.queue.write_buffer(
-            &self.instance_buffer,
-            0,
-            bytemuck::cast_slice(&self.positions),
-        );
+        let mut edge_positions: Vec<[[f32; 2]; 2]> = vec![];
+        // Update edge endpoints from node positions
+        for edge in &mut self.edges {
+            edge_positions.push([self.positions[edge[0]], self.positions[edge[1]]]);
+        }
 
         self.queue.write_buffer(
             &self.edge_instance_buffer,
             0,
-            bytemuck::cast_slice(&self.edges),
+            bytemuck::cast_slice(&edge_positions),
         );
+
+        self.queue
+            .write_buffer(&self.node_instance_buffer, 0, bytemuck::cast_slice(&nodes));
     }
 
     fn handle_key(&self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
@@ -433,13 +685,6 @@ impl ApplicationHandler<State> for App {
         }
 
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            // If we are not on web we can use pollster to
-            // await the
-            self.state = Some(pollster::block_on(State::new(window)).unwrap());
-        }
 
         #[cfg(target_arch = "wasm32")]
         {
@@ -536,9 +781,6 @@ pub fn run() -> anyhow::Result<()> {
         #[cfg(target_arch = "wasm32")]
         &event_loop,
     );
-
-    #[cfg(not(target_arch = "wasm32"))]
-    event_loop.run_app(&mut app)?;
 
     #[cfg(target_arch = "wasm32")]
     event_loop.spawn_app(app);
