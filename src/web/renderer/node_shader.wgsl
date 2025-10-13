@@ -2,13 +2,11 @@ struct VertIn {
     @location(0) quad_pos: vec2<f32>, // [-1..1] quad corner in local space
     @location(1) inst_pos: vec2<f32>, // per-instance node position in pixels
     @location(2) node_type: u32, // Type of node used when drawing
-    @location(2) node_type: u32, // Type of node used when drawing
 };
 
 struct VertOut {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) v_uv: vec2<f32>, // 0..1 inside quad
-    @location(1) node_type: u32,
     @location(1) node_type: u32,
 };
 
@@ -21,7 +19,6 @@ const NODE_RADIUS_PIX = 48.0; // pixels
 @vertex
 fn vs_node_main(
     in: VertIn,
-    @builtin(instance_index) instanceIndex: u32,
     @builtin(instance_index) instanceIndex: u32,
 ) -> VertOut {
     var out: VertOut;
@@ -55,7 +52,6 @@ fn fs_node_main(in: VertOut) -> @location(0) vec4<f32> {
     // circle distance
     let d = distance(in.v_uv, vec2<f32>(0.5, 0.5));
     let r = 0.48;
-    let r = 0.48;
 
     // parameters
     const BORDER_THICKNESS = 0.05;   // how thick the border ring is
@@ -76,9 +72,6 @@ fn fs_node_main(in: VertOut) -> @location(0) vec4<f32> {
     // colors
     var fill_color = vec3<f32>(0.40724, 0.60383, 1.0);
     if in.node_type == 1 {fill_color = vec3<f32>(0.03189, 0.13286, 0.60382);}
-    let border_color = vec3<f32>(0.0, 0.0, 0.0);
-    let background = vec3<f32>(0.84, 0.87, 0.88);
-    var fill_color = vec3<f32>(0.40724, 0.60383, 1.0);
     var col: vec3<f32>;
 
     switch in.node_type {
