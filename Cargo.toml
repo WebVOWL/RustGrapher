@@ -26,14 +26,16 @@
     anyhow="1.0.0"
     bytemuck={version="1.16.0", features=["derive"]}
     glam="0.29.0"
-    glyphon="0.9.0"
+    glyphon={git="https://github.com/grovesNL/glyphon", rev="de4b5b8"}
     log="0.4.0"
     pollster="0.4.0"
     rayon="1.10.0"
-    wgpu={version="25.0.2", default-features=false, features=[
+    wgpu={version="27.0.1", default-features=false, features=[
         "webgl",
         "static-dxc",
         "wgsl",
+        "std",
+        "parking_lot",
     ]}
     winit="0.30.0"
 
@@ -75,10 +77,12 @@
     harness=false
     name="physics_bench"
 
-[lints.clippy]
-    derivable_impls="allow"
-    new_without_default="allow"
-
+[features]
+    default=["web"]
+    static=["wgpu/static-dxc"]
+    web=["wgpu/web", "webgpu", "static"]
+    webgl=["wgpu/webgl"]
+    webgpu=["wgpu/webgpu"]
 
 # Default profile for devs, fast to compile, okay enough to run
 [profile.dev]
