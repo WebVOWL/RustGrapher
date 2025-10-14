@@ -50,6 +50,7 @@ struct State {
     num_edge_instances: u32,
     // Node and edge coordinates in pixels
     positions: Vec<[f32; 2]>,
+    labels: Vec<String>,
     edges: Vec<[usize; 2]>,
     node_types: Vec<NodeType>,
     frame_count: u64, // TODO: Remove after implementing simulator
@@ -165,6 +166,11 @@ impl State {
 
         // TODO: remove test code after adding simulator
         let positions = [[50.0, 50.0], [250.0, 250.0], [450.0, 450.0]];
+        let labels = vec![
+            String::from("My class"),
+            String::from("Loooooooong class"),
+            String::from("Thing"),
+        ];
 
         let node_types = [NodeType::Class, NodeType::ExternalClass, NodeType::Thing];
 
@@ -337,6 +343,7 @@ impl State {
             edge_instance_buffer,
             num_edge_instances,
             positions: positions.to_vec(),
+            labels,
             edges: edges.to_vec(),
             node_types: node_types.to_vec(),
             frame_count: 0,
@@ -375,7 +382,7 @@ impl State {
 
         // Embed font bytes into the binary
         const DEFAULT_FONT_BYTES: &'static [u8] = include_bytes!("../../assets/DejaVuSans.ttf");
-        log::info!("Font size: {} bytes", DEFAULT_FONT_BYTES.len());
+        // log::info!("Font size: {} bytes", DEFAULT_FONT_BYTES.len());
 
         let mut font_system = FontSystem::new_with_fonts(core::iter::once(
             glyphon::fontdb::Source::Binary(Arc::new(DEFAULT_FONT_BYTES.to_vec())),
@@ -400,7 +407,7 @@ impl State {
         );
         let scale = self.window.scale_factor() as f32;
         let mut text_buffers: Vec<GlyphBuffer> = Vec::new();
-        for ty in self.node_types.iter() {
+        for label in self.labels.clone() {
             let font_px = 16.0 * scale; // font size in physical pixels
             let line_px = 28.0 * scale;
             let mut buf = GlyphBuffer::new(&mut font_system, Metrics::new(font_px, line_px));
@@ -410,19 +417,15 @@ impl State {
             let label_height = 24.0 * scale;
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
             // sample label using the NodeType
-            let label = match ty {
-                NodeType::Class => "Class",
-                NodeType::ExternalClass => "External",
-                NodeType::Thing => "Thing",
-            };
-            buf.set_text(
+            let attrs = &Attrs::new().family(Family::SansSerif);
+            buf.set_rich_text(
                 &mut font_system,
-                &label,
-                &Attrs::new().family(Family::SansSerif),
+                [(label.as_str(), attrs.clone())],
+                &attrs,
                 Shaping::Advanced,
+                Some(glyphon::cosmic_text::Align::Center),
             );
             buf.shape_until_scroll(&mut font_system, false);
-            // buf.lines[0].set_align(Some(glyphon::cosmic_text::Align::Center));
             text_buffers.push(buf);
         }
 
