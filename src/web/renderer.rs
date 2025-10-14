@@ -401,12 +401,7 @@ impl State {
         let cache = Cache::new(&self.device);
         let viewport = Viewport::new(&self.device, &cache);
 
-        let mut atlas = TextAtlas::new(
-            &self.device,
-            &self.queue,
-            &cache,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
-        );
+        let mut atlas = TextAtlas::new(&self.device, &self.queue, &cache, self.config.format);
         let text_renderer = TextRenderer::new(
             &mut atlas,
             &self.device,
