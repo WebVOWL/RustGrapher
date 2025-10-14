@@ -3,7 +3,7 @@ mod vertex_buffer;
 
 use glam::Vec2;
 use log::info;
-use std::sync::Arc;
+use std::{cmp::min, sync::Arc};
 use wgpu::util::DeviceExt;
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::EventLoopExtWebSys;
