@@ -519,7 +519,7 @@ impl State {
                     buffer: buf,
                     left,
                     top,
-                    scale: 1.0,
+                    scale: scale,
                     bounds: TextBounds {
                         left: left as i32,
                         top: top as i32,
