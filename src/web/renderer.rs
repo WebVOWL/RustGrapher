@@ -67,15 +67,26 @@ struct State {
 
 impl State {
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
+        // Check if we can use WebGPU (as if this writing it's only enabled in some browsers)
+        let is_webgpu_enabled = wgpu::util::is_browser_webgpu_supported().await;
+
+        // Pick appropriate render backends
+        // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
+        let backends = if is_webgpu_enabled {
+            wgpu::Backends::BROWSER_WEBGPU
+        } else if cfg!(target_arch = "wasm32") {
+            wgpu::Backends::GL
+        } else {
+            wgpu::Backends::PRIMARY
+        };
+
         info!("Building render state");
 
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
-        // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            #[cfg(target_arch = "wasm32")]
-            backends: wgpu::Backends::GL,
+            backends: backends,
             ..Default::default()
         });
 
@@ -94,8 +105,9 @@ impl State {
                 label: None,
                 required_features: wgpu::Features::empty(),
                 // WebGL doesn't support all of wgpu's features, so if
-                // we're building for the web we'll have to disable some.
-                required_limits: if cfg!(target_arch = "wasm32") {
+                // we're building for a browser not supporting WebGPU,
+                // we'll have to disable some.
+                required_limits: if cfg!(target_arch = "wasm32") && !is_webgpu_enabled {
                     wgpu::Limits::downlevel_webgl2_defaults()
                 } else {
                     wgpu::Limits::default()
