@@ -427,8 +427,9 @@ impl State {
 
     pub fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
-            self.config.width = width;
-            self.config.height = height;
+            let max_size = self.device.limits().max_texture_dimension_2d;
+            self.config.width = min(width, max_size);
+            self.config.height = min(height, max_size);
             self.surface.configure(&self.device, &self.config);
             self.is_surface_configured = true;
 
