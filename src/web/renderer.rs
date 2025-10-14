@@ -35,7 +35,7 @@ struct State {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     is_surface_configured: bool,
-    render_pipeline: wgpu::RenderPipeline,
+    node_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     num_vertices: u32,
     resolution_buffer: wgpu::Buffer,
@@ -201,16 +201,16 @@ impl State {
         });
 
         // Include the bind group layout in the pipeline layout
-        let render_pipeline_layout =
+        let node_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
+                label: Some("Node Pipeline Layout"),
                 bind_group_layouts: &[&resolution_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let node_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Node Pipeline"),
-            layout: Some(&render_pipeline_layout),
+            layout: Some(&node_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_node_main"),
@@ -273,7 +273,7 @@ impl State {
 
         let edge_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Edge Pipeline"),
-            layout: Some(&render_pipeline_layout),
+            layout: Some(&node_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &edge_shader,
                 entry_point: Some("vs_edge_main"),
@@ -341,7 +341,7 @@ impl State {
             queue,
             config,
             is_surface_configured: surface_configured,
-            render_pipeline,
+            node_pipeline,
             vertex_buffer,
             num_vertices,
             resolution_buffer,
@@ -588,7 +588,7 @@ impl State {
             render_pass.draw(0..self.num_vertices, 0..self.num_edge_instances);
 
             // Draw nodes
-            render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_pipeline(&self.node_pipeline);
             // set vertex buffers: slot 0 = quad vertices, slot 1 = per-instance positions
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.node_instance_buffer.slice(..));
