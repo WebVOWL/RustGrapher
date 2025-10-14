@@ -3,6 +3,7 @@ mod vertex_buffer;
 
 use glam::Vec2;
 use log::info;
+use specs::WorldExt;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 #[cfg(target_arch = "wasm32")]
@@ -20,7 +21,7 @@ use wasm_bindgen::prelude::*;
 
 use vertex_buffer::{NodeInstance, VERTICES, Vertex};
 
-use crate::web::simulator::Simulator;
+use crate::web::simulator::{Simulator, components::nodes::Position};
 
 use crate::web::renderer::node_types::NodeType;
 
@@ -54,6 +55,7 @@ struct State {
     edges: Vec<[usize; 2]>,
     node_types: Vec<NodeType>,
     frame_count: u64, // TODO: Remove after implementing simulator
+    simulator: Simulator<'static, 'static>,
 
     // Glyphon resources are initialized lazily when we have a non-zero surface.
     font_system: Option<FontSystem>,
@@ -295,21 +297,13 @@ impl State {
             cache: None,
         });
 
-        let sim_nodes = vec![Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0)];
+        let sim_nodes = vec![
+            Vec2::new(positions[0][0], positions[0][1]),
+            Vec2::new(positions[1][0], positions[1][1]),
+            Vec2::new(positions[2][0], positions[2][1]),
+        ];
         let sim_edges = vec![Vec2::new(0.0, 1.0)];
         let mut simulator = Simulator::builder().build(sim_nodes, sim_edges);
-        for _ in 0..3 {
-            info!("Dispatch");
-            simulator.dispatcher.dispatch(&simulator.world);
-        }
-
-        let sim_nodes = vec![Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0)];
-        let sim_edges = vec![Vec2::new(0.0, 1.0)];
-        let mut simulator = Simulator::builder().build(sim_nodes, sim_edges);
-        for _ in 0..3 {
-            info!("Dispatch");
-            simulator.dispatcher.dispatch(&simulator.world);
-        }
 
         // Glyphon: do not create heavy glyphon resources unless we have a non-zero surface.
         // Initialize them lazily below (or on first resize).
@@ -347,6 +341,7 @@ impl State {
             edges: edges.to_vec(),
             node_types: node_types.to_vec(),
             frame_count: 0,
+            simulator,
             font_system,
             swash_cache,
             viewport,
@@ -610,11 +605,20 @@ impl State {
     }
 
     fn update(&mut self) {
-        self.frame_count += 1;
-        let t = ((self.frame_count as f32) * 0.05).sin();
+        self.simulator.dispatcher.dispatch(&self.simulator.world);
+        self.simulator.world.maintain();
 
-        // Update node positions
-        self.positions[1] = [self.positions[1][0], self.positions[1][1] + t];
+        let positions_storage = self.simulator.world.read_storage::<Position>();
+        for (i, entity) in self.simulator.entities.iter().enumerate() {
+            if let Some(pos) = positions_storage.get(*entity) {
+                self.positions[i] = [pos.0.x, pos.0.y];
+            }
+        }
+        // self.frame_count += 1;
+        // let t = ((self.frame_count as f32) * 0.05).sin();
+
+        // // Update node positions
+        // self.positions[1] = [self.positions[1][0], self.positions[1][1] + t];
 
         let nodes: Vec<NodeInstance> = self
             .positions

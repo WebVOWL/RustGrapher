@@ -1,4 +1,4 @@
-mod components;
+pub mod components;
 mod ressources;
 
 use crate::web::{
@@ -366,6 +366,7 @@ impl<'a> System<'a> for UpdateEdgeForces {
 pub struct Simulator<'a, 'b> {
     pub world: World,
     pub dispatcher: Dispatcher<'a, 'b>,
+    pub entities: Vec<Entity>,
 }
 
 impl<'a, 'b> Simulator<'a, 'b> {
@@ -531,12 +532,13 @@ impl SimulatorBuilder {
             .build();
 
         dispatcher.setup(&mut world);
-        Self::create_entities(&mut world, nodes, edges);
+        let entities = Self::create_entities(&mut world, nodes, edges);
         self.add_ressources(&mut world);
 
         Simulator {
             world: world,
             dispatcher: dispatcher,
+            entities,
         }
         // TODO: We need signals to start / stop / pause the simulation
     }
@@ -553,7 +555,7 @@ impl SimulatorBuilder {
         world.insert(QuadTree::default());
     }
 
-    fn create_entities(world: &mut World, nodes: Vec<Vec2>, edges: Vec<Vec2>) {
+    fn create_entities(world: &mut World, nodes: Vec<Vec2>, edges: Vec<Vec2>) -> Vec<Entity> {
         let mut node_entities = Vec::with_capacity(nodes.len());
 
         for node in nodes {
@@ -576,6 +578,8 @@ impl SimulatorBuilder {
                 })
                 .build();
         }
+
+        node_entities
     }
 }
 
