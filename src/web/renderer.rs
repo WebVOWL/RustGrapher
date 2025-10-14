@@ -401,13 +401,13 @@ impl State {
         let scale = self.window.scale_factor() as f32;
         let mut text_buffers: Vec<GlyphBuffer> = Vec::new();
         for ty in self.node_types.iter() {
-            let font_px = 12.0 * scale; // font size in physical pixels
+            let font_px = 16.0 * scale; // font size in physical pixels
             let line_px = 28.0 * scale;
             let mut buf = GlyphBuffer::new(&mut font_system, Metrics::new(font_px, line_px));
             // per-label size (in physical pixels)
             // TODO: update if we implement dynamic node size
             let label_width = 96.0 * scale;
-            let label_height = 96.0 * scale;
+            let label_height = 24.0 * scale;
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
             // sample label using the NodeType
             let label = match ty {
@@ -422,6 +422,7 @@ impl State {
                 Shaping::Advanced,
             );
             buf.shape_until_scroll(&mut font_system, false);
+            // buf.lines[0].set_align(Some(glyphon::cosmic_text::Align::Center));
             text_buffers.push(buf);
         }
 
@@ -490,14 +491,14 @@ impl State {
                 let node_y_px = vp_h_px - node_logical[1] * scale;
 
                 let (label_w_opt, label_h_opt) = buf.size();
-                let label_w = label_w_opt.unwrap_or(100.0) as f32;
+                let label_w = label_w_opt.unwrap_or(96.0) as f32;
                 let label_h = label_h_opt.unwrap_or(24.0) as f32;
 
                 // center horizontally on node
                 let left = node_x_px - label_w * 0.5;
 
                 // top = distance-from-top-in-physical-pixels
-                let top = node_y_px - label_h * 0.5;
+                let top = node_y_px - 16.0;
 
                 areas.push(TextArea {
                     buffer: buf,
@@ -607,10 +608,10 @@ impl State {
 
     fn update(&mut self) {
         self.frame_count += 1;
-        let t = ((self.frame_count as f32) * 0.05).sin() * 20.0;
+        let t = ((self.frame_count as f32) * 0.05).sin();
 
         // Update node positions
-        self.positions[1] = [100.0, 100.0 + t];
+        self.positions[1] = [self.positions[1][0], self.positions[1][1] + t];
 
         let nodes: Vec<NodeInstance> = self
             .positions
