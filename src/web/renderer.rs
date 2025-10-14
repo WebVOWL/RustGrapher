@@ -463,6 +463,11 @@ impl State {
         }
     }
 
+    pub fn update_scale(&mut self, scale: f64) {
+        let scale_factor = self.window.scale_factor();
+        self.resize(self.config.width * scale_factor as u32, self.config.height * scale_factor as u32);
+    }
+
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         self.window.request_redraw();
 
@@ -744,12 +749,12 @@ impl ApplicationHandler<State> for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => state.resize(size.width, size.height),
-            // WindowEvent::ScaleFactorChanged {
-            //     scale_factor,
-            //     inner_size_writer,
-            // } => {
-            //     state.resize(width, height);
-            // }
+            WindowEvent::ScaleFactorChanged {
+                scale_factor,
+                ..,
+            } => {
+                state.update_scale(scale_factor);
+            }
             WindowEvent::RedrawRequested => {
                 state.update();
                 match state.render() {
