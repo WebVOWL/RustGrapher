@@ -400,6 +400,7 @@ impl State {
         let scale = self.window.scale_factor() as f32;
         let mut text_buffers: Vec<GlyphBuffer> = Vec::new();
         for label in self.labels.clone() {
+            // TODO: handle node types with default text, e.g. external class
             let font_px = 16.0 * scale; // font size in physical pixels
             let line_px = 28.0 * scale;
             let mut buf = GlyphBuffer::new(&mut font_system, Metrics::new(font_px, line_px));

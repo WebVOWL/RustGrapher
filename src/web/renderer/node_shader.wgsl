@@ -47,21 +47,27 @@ fn vs_node_main(
     return out;
 }
 
+// parameters
+const BORDER_THICKNESS = 0.05;   // how thick the border ring is
+const EDGE_SOFTNESS    = 0.03;   // anti-aliasing
+// polar angle based repeating pattern (owl:thing dotted line)
+const PI = 3.14159265;
+const DOT_COUNT = 14.0;        // number of dots around the ring
+const DOT_RADIUS = 0.3;        // half-width of each dot in pattern-space (0..0.5)
+const DOT_EDGE = 0.01;         // softness of dot edges
+
 @fragment
 fn fs_node_main(in: VertOut) -> @location(0) vec4<f32> {
     // circle distance
-    let d = distance(in.v_uv, vec2<f32>(0.5, 0.5));
+    
+    let v_uv = in.v_uv;
+
+    return draw_node_by_type(in.node_type, v_uv);
+}
+
+fn draw_class(v_uv: vec2<f32>) -> vec4<f32> {
+    let d = distance(v_uv, vec2<f32>(0.5, 0.5));
     let r = 0.48;
-
-    // parameters
-    const BORDER_THICKNESS = 0.05;   // how thick the border ring is
-    const EDGE_SOFTNESS    = 0.03;   // anti-aliasing
-    // polar angle based repeating pattern (owl:thing dotted line)
-    const PI = 3.14159265;
-    const DOT_COUNT = 14.0;        // number of dots around the ring
-    const DOT_RADIUS = 0.3;        // half-width of each dot in pattern-space (0..0.5)
-    const DOT_EDGE = 0.01;         // softness of dot edges
-
     // smooth fill mask (circle inside without border)
     var fill_mask = 1.0 - smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d);
 
@@ -69,55 +75,156 @@ fn fs_node_main(in: VertOut) -> @location(0) vec4<f32> {
     var border_mask = smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d)
                     * (1.0 - smoothstep(r, r + EDGE_SOFTNESS, d));
 
-    // colors
-    var fill_color = vec3<f32>(0.40724, 0.60383, 1.0);
-    if in.node_type == 1 {fill_color = vec3<f32>(0.03189, 0.13286, 0.60382);}
-    var col: vec3<f32>;
+    let fill_color = vec3<f32>(0.40724, 0.60383, 1.0);
 
-    switch in.node_type {
-        case 1: {
-            fill_color = vec3<f32>(0.03189, 0.13286, 0.60382);
+    let border_color = vec3<f32>(0.0, 0.0, 0.0);
+    let background = vec3<f32>(0.84, 0.87, 0.88);
 
-            let border_color = vec3<f32>(0.0, 0.0, 0.0);
-            let background = vec3<f32>(0.84, 0.87, 0.88);
+    // blend smoothly: background -> border -> fill
+    var col = mix(background, border_color, border_mask);
+    col = mix(col, fill_color, fill_mask);
 
-            // blend smoothly: background -> border -> fill
-            col = mix(background, border_color, border_mask);
-            col = mix(col, fill_color, fill_mask);
-        }
-        case 2: {
-            let center = vec2(0.5, 0.5);
-            let dir = in.v_uv - center;
-            let angle = atan2(dir.y, dir.x);          // -PI..PI
-            let ang01 = angle / (2.0 * PI) + 0.5;     // 0..1
-            let p = fract(ang01 * DOT_COUNT);         // 0..1 per dot segment
-            let distToDot = abs(p - 0.5);             // distance from center of dot segment
-            let dot_mask = 1.0 - smoothstep(DOT_RADIUS - DOT_EDGE, DOT_RADIUS + DOT_EDGE, distToDot);
-
-            // apply dot mask to border mask so the ring becomes dotted
-            border_mask *= dot_mask;
-
-            fill_color = vec3<f32>(1.0, 1.0, 1.0);
-
-            let border_color = vec3(0.0, 0.0, 0.0);
-            let background = vec3(0.84, 0.87, 0.88);
-
-            // blend smoothly: background -> border -> fill
-            col = mix(background, border_color, border_mask);
-            col = mix(col, fill_color, fill_mask);
-        }
-        default: {
-            let border_color = vec3<f32>(0.0, 0.0, 0.0);
-            let background = vec3<f32>(0.84, 0.87, 0.88);
-
-            // blend smoothly: background -> border -> fill
-            col = mix(background, border_color, border_mask);
-            col = mix(col, fill_color, fill_mask);
-        }
-    }
+    // blend smoothly: background -> border -> fill
+    col = mix(background, border_color, border_mask);
+    col = mix(col, fill_color, fill_mask);
 
     // smooth alpha (fill + border)
     let alpha = clamp(fill_mask + border_mask, 0.0, 1.0);
 
     return vec4<f32>(col, alpha);
+}
+
+fn draw_subclass(v_uv: vec2<f32>)  -> vec4<f32> {
+    let d = distance(v_uv, vec2<f32>(0.5, 0.5));
+    let r = 0.48;
+    // smooth fill mask (circle inside without border)
+    var fill_mask = 1.0 - smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d);
+
+    // smooth border mask (ring around circle)
+    var border_mask = smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d)
+                    * (1.0 - smoothstep(r, r + EDGE_SOFTNESS, d));
+
+    let fill_color = vec3<f32>(0.03189, 0.13286, 0.60382);
+    var col: vec3<f32>;
+
+    let border_color = vec3<f32>(0.0, 0.0, 0.0);
+    let background = vec3<f32>(0.84, 0.87, 0.88);
+
+    // blend smoothly: background -> border -> fill
+    col = mix(background, border_color, border_mask);
+    col = mix(col, fill_color, fill_mask);
+
+    // smooth alpha (fill + border)
+    let alpha = clamp(fill_mask + border_mask, 0.0, 1.0);
+
+    return vec4<f32>(col, alpha);
+}
+
+fn draw_thing(v_uv: vec2<f32>)  -> vec4<f32> {
+    let d = distance(v_uv, vec2<f32>(0.5, 0.5));
+    let r = 0.48;
+    // smooth fill mask (circle inside without border)
+    var fill_mask = 1.0 - smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d);
+
+    // smooth border mask (ring around circle)
+    var border_mask = smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d)
+                    * (1.0 - smoothstep(r, r + EDGE_SOFTNESS, d));
+
+    let center = vec2(0.5, 0.5);
+    let dir = v_uv - center;
+    let angle = atan2(dir.y, dir.x);          // -PI..PI
+    let ang01 = angle / (2.0 * PI) + 0.5;     // 0..1
+    let p = fract(ang01 * DOT_COUNT);         // 0..1 per dot segment
+    let distToDot = abs(p - 0.5);             // distance from center of dot segment
+    let dot_mask = 1.0 - smoothstep(DOT_RADIUS - DOT_EDGE, DOT_RADIUS + DOT_EDGE, distToDot);
+
+    // apply dot mask to border mask so the ring becomes dotted
+    border_mask *= dot_mask;
+
+    let fill_color = vec3<f32>(1.0, 1.0, 1.0);
+
+    let border_color = vec3(0.0, 0.0, 0.0);
+    let background = vec3(0.84, 0.87, 0.88);
+
+    // blend smoothly: background -> border -> fill
+    var col = mix(background, border_color, border_mask);
+    col = mix(col, fill_color, fill_mask);
+
+    // smooth alpha (fill + border)
+    let alpha = clamp(fill_mask + border_mask, 0.0, 1.0);
+
+    return vec4<f32>(col, alpha);
+}
+
+fn draw_equivalent_class(v_uv: vec2<f32>)  -> vec4<f32> {
+    return vec4<f32>(0.0); // TODO: implement
+}
+
+fn draw_disjoint_union(v_uv: vec2<f32>)  -> vec4<f32> {
+    return vec4<f32>(0.0); // TODO: implement
+}
+
+fn draw_intersection_of(v_uv: vec2<f32>)  -> vec4<f32> {
+    return vec4<f32>(0.0); // TODO: implement
+}
+
+fn draw_complement(v_uv: vec2<f32>)  -> vec4<f32> {
+    return vec4<f32>(0.0); // TODO: implement
+}
+
+fn draw_anonymous_class(v_uv: vec2<f32>)  -> vec4<f32> {
+    return vec4<f32>(0.0); // TODO: implement
+}
+
+fn draw_literal(v_uv: vec2<f32>)  -> vec4<f32> {
+    return vec4<f32>(0.0); // TODO: implement
+}
+
+fn draw_rdfs_class(v_uv: vec2<f32>)  -> vec4<f32> {
+    return vec4<f32>(0.0); // TODO: implement
+}
+
+fn draw_rdfs_resource(v_uv: vec2<f32>)  -> vec4<f32> {
+    return vec4<f32>(0.0); // TODO: implement
+}
+
+fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>) -> vec4<f32> {
+    switch node_type {
+        case 0: {
+            return draw_class(v_uv);
+        }
+        case 1: {
+            return draw_subclass(v_uv);
+        }
+        case 2: {
+            return draw_thing(v_uv);
+        }
+        case 3: {
+            return draw_equivalent_class(v_uv);
+        }
+        case 4: {
+            return draw_disjoint_union(v_uv);
+        }
+        case 5: {
+            return draw_intersection_of(v_uv);
+        }
+        case 6: {
+            return draw_complement(v_uv);
+        }
+        case 7: {
+            return draw_anonymous_class(v_uv);
+        }
+        case 8: {
+            return draw_literal(v_uv);
+        }
+        case 9: {
+            return draw_rdfs_class(v_uv);
+        }
+        case 10: {
+            return draw_rdfs_resource(v_uv);
+        }
+        default: {
+            return vec4(0.0);
+        }
+    }
 }
