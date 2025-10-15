@@ -376,13 +376,13 @@ impl<'a> System<'a> for UpdateEdgeForces {
             let rb1 = connection.src;
             let rb2 = connection.target;
 
-            let direction_vec = positions.get(rb1).unwrap().0 - positions.get(rb2).unwrap().0;
+            let direction_vec = positions.get(rb2).unwrap().0 - positions.get(rb1).unwrap().0;
+
             let force_magnitude =
-                spring_stiffness.0 * direction_vec.length() - spring_neutral_length.0;
+                spring_stiffness.0 * (direction_vec.length() - spring_neutral_length.0);
 
-            let spring_force = direction_vec.normalize_or(Vec2::ZERO) * force_magnitude;
+            let spring_force = direction_vec.normalize_or(Vec2::ZERO) * -force_magnitude;
 
-            // Calling unwrap here is safe, as we're calling get on an already existing entity.
             let rb1_force = forces.get(rb1).unwrap().0;
             let rb2_force = forces.get(rb2).unwrap().0;
 
