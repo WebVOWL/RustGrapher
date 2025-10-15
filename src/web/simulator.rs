@@ -199,12 +199,12 @@ impl CalculateNodeForce {
     /// number 2 is the "fake", approximate node.
     fn repel_force(pos1: Vec2, pos2: Vec2, mass1: f32, mass2: f32, repel_force: f32) -> Vec2 {
         let dir_vec = pos2 - pos1;
-
-        if dir_vec.length_squared() == 0.0 {
+        let length_sqr = dir_vec.length_squared();
+        if length_sqr == 0.0 {
             return Vec2::ZERO;
         }
 
-        let f = -repel_force * (mass1 * mass2).abs() / dir_vec.length_squared();
+        let f = -repel_force * (mass1 * mass2).abs() / length_sqr;
         let dir_vec_normalized = dir_vec.normalize_or(Vec2::ZERO);
         let force = dir_vec_normalized * f;
 
