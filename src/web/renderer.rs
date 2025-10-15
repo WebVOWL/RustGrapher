@@ -56,6 +56,7 @@ struct State {
     node_types: Vec<NodeType>,
     frame_count: u64, // TODO: Remove after implementing simulator
     simulator: Simulator<'static, 'static>,
+    paused: bool,
 
     // Glyphon resources are initialized lazily when we have a non-zero surface.
     font_system: Option<FontSystem>,
@@ -342,6 +343,7 @@ impl State {
             node_types: node_types.to_vec(),
             frame_count: 0,
             simulator,
+            paused: false,
             font_system,
             swash_cache,
             viewport,
@@ -646,9 +648,13 @@ impl State {
             .write_buffer(&self.node_instance_buffer, 0, bytemuck::cast_slice(&nodes));
     }
 
-    fn handle_key(&self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
+    fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
         match (code, is_pressed) {
             (KeyCode::Escape, true) => event_loop.exit(),
+            (KeyCode::Space, true) => {
+                self.paused = !self.paused;
+                self.window.request_redraw();
+            }
             _ => {}
         }
     }
@@ -748,6 +754,10 @@ impl ApplicationHandler<State> for App {
             //     state.resize(width, height);
             // }
             WindowEvent::RedrawRequested => {
+                if state.paused {
+                    return;
+                }
+
                 state.update();
                 match state.render() {
                     Ok(_) => {
