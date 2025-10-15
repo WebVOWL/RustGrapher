@@ -399,7 +399,7 @@ impl State {
         }
 
         // Embed font bytes into the binary
-        const DEFAULT_FONT_BYTES: &'static [u8] = include_bytes!("../../assets/DejaVuSansMono.ttf");
+        const DEFAULT_FONT_BYTES: &'static [u8] = include_bytes!("../../assets/OpenSans.ttf");
         // log::info!("Font size: {} bytes", DEFAULT_FONT_BYTES.len());
 
         let mut font_system = FontSystem::new_with_fonts(core::iter::once(
@@ -425,22 +425,32 @@ impl State {
         );
         let scale = self.window.scale_factor() as f32;
         let mut text_buffers: Vec<GlyphBuffer> = Vec::new();
-        for label in self.labels.clone() {
+        for (i, label) in self.labels.clone().iter().enumerate() {
             // TODO: handle node types with default text, e.g. external class
             // TODO: combine EquivalentClass nodes
-            let font_px = 14.0 * scale; // font size in physical pixels
-            let line_px = 28.0 * scale;
+            let font_px = 12.0 * scale; // font size in physical pixels
+            let line_px = 12.0 * scale;
             let mut buf = GlyphBuffer::new(&mut font_system, Metrics::new(font_px, line_px));
             // per-label size (in physical pixels)
             // TODO: update if we implement dynamic node size
             let label_width = 90.0 * scale;
-            let label_height = 24.0 * scale;
+            let label_height = match self.node_types[i] {
+                NodeType::ExternalClass => 48.0 * scale,
+                _ => 24.0 * scale,
+            };
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
             // sample label using the NodeType
             let attrs = &Attrs::new().family(Family::SansSerif);
+            let spans = match self.node_types[i] {
+                NodeType::ExternalClass => vec![
+                    (label.as_str(), attrs.clone()),
+                    ("\n(external)", attrs.clone()),
+                ],
+                _ => vec![(label.as_str(), attrs.clone())],
+            };
             buf.set_rich_text(
                 &mut font_system,
-                [(label.as_str(), attrs.clone())],
+                spans,
                 &attrs,
                 Shaping::Advanced,
                 Some(glyphon::cosmic_text::Align::Center),
@@ -522,7 +532,7 @@ impl State {
                 let left = node_x_px - label_w * 0.5;
 
                 // top = distance-from-top-in-physical-pixels
-                let top = node_y_px - 16.0;
+                let top = node_y_px - 8.0;
 
                 areas.push(TextArea {
                     buffer: buf,
