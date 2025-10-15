@@ -349,8 +349,8 @@ impl<'a> System<'a> for UpdateNodePosition {
 
             pos.0 += velocity.0 * delta_time.0;
 
-            let fixed = entities.create();
             if freeze_threshold.0 > velocity.0.abs().length() {
+                let fixed = entities.create();
                 updater.insert(fixed, Fixed);
             }
         }
