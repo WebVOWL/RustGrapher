@@ -399,7 +399,7 @@ impl State {
         }
 
         // Embed font bytes into the binary
-        const DEFAULT_FONT_BYTES: &'static [u8] = include_bytes!("../../assets/DejaVuSans.ttf");
+        const DEFAULT_FONT_BYTES: &'static [u8] = include_bytes!("../../assets/DejaVuSansMono.ttf");
         // log::info!("Font size: {} bytes", DEFAULT_FONT_BYTES.len());
 
         let mut font_system = FontSystem::new_with_fonts(core::iter::once(
