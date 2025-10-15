@@ -246,7 +246,7 @@ impl<'a> System<'a> for CalculateNodeForce {
                 let node_approximations = quadtree.stack(&pos.0, theta.0);
 
                 for node_approximation in node_approximations {
-                    node_forces.0 += Self::repel_force(
+                    node_forces.0 = Self::repel_force(
                         pos.0,
                         node_approximation.position(),
                         mass.0,
