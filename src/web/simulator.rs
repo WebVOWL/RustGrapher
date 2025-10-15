@@ -581,7 +581,6 @@ impl SimulatorBuilder {
             dispatcher: dispatcher,
             entities,
         }
-        // TODO: We need signals to start / stop / pause the simulation
     }
 
     fn add_ressources(self: Self, world: &mut World) {
@@ -630,12 +629,12 @@ impl Default for SimulatorBuilder {
         Self {
             repel_force: 100.0,
             spring_stiffness: 100.0,
-            spring_neutral_length: 2.0,
+            spring_neutral_length: 1000.0,
             gravity_force: 1.0,
             delta_time: 0.005,
             damping: 0.9,
             quadtree_theta: 0.75,
-            freeze_thresh: 1e-2,
+            freeze_thresh: 2.0,
         }
     }
 }
