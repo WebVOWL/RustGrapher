@@ -49,8 +49,8 @@ fn vs_node_main(
 
 // parameters
 const BORDER_THICKNESS = 0.05;   // how thick the border ring is
-const EDGE_SOFTNESS    = 0.03;   // anti-aliasing
-// polar angle based repeating pattern (owl:thing dotted line)
+const EDGE_SOFTNESS    = 0.02;   // anti-aliasing
+// polar angle based repeating pattern (dotted border)
 const PI = 3.14159265;
 const DOT_COUNT = 14.0;        // number of dots around the ring
 const DOT_RADIUS = 0.3;        // half-width of each dot in pattern-space (0..0.5)
@@ -157,7 +157,39 @@ fn draw_thing(v_uv: vec2<f32>)  -> vec4<f32> {
 }
 
 fn draw_equivalent_class(v_uv: vec2<f32>)  -> vec4<f32> {
-    return vec4<f32>(0.0); // TODO: implement
+    let d = distance(v_uv, vec2<f32>(0.5, 0.5));
+    let r = 0.48;
+
+    let border_gap = 0.02;
+
+    // radius of the inner border
+    let inner_border_outer_r = r - BORDER_THICKNESS - border_gap;
+    let inner_border_inner_r = inner_border_outer_r - BORDER_THICKNESS;
+
+    // fill mask (everything inside the inner border)
+    let fill_mask = 1.0 - smoothstep(inner_border_inner_r, inner_border_inner_r + EDGE_SOFTNESS, d);
+
+    // inner border (fully opaque)
+    let inner_border_mask = smoothstep(inner_border_inner_r, inner_border_inner_r + EDGE_SOFTNESS, d) * (1.0 - smoothstep(inner_border_outer_r, inner_border_outer_r + EDGE_SOFTNESS, d));
+
+    // outer border
+    let outer_border_mask = smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d) *
+        (1.0 - smoothstep(r, r + EDGE_SOFTNESS, d));
+
+    let fill_color = vec3<f32>(0.40724, 0.60383, 1.0);
+
+    let border_color = vec3<f32>(0.0, 0.0, 0.0);
+    let background = vec3<f32>(0.84, 0.87, 0.88);
+
+    // blend smoothly: background -> border -> fill
+    var col = mix(background, border_color, outer_border_mask);
+    col = mix(col, border_color, inner_border_mask);
+    col = mix(col, fill_color, fill_mask);
+
+    // smooth alpha (fill + border)
+    let alpha = clamp(fill_mask + outer_border_mask + inner_border_mask, 0.0, 1.0);
+
+    return vec4<f32>(col, alpha);
 }
 
 fn draw_disjoint_union(v_uv: vec2<f32>)  -> vec4<f32> {
