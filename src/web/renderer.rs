@@ -167,28 +167,37 @@ impl State {
         // TODO: remove test code after adding simulator
         let positions = [
             [50.0, 50.0],
+            [250.0, 50.0],
+            [450.0, 50.0],
             [250.0, 250.0],
             [450.0, 450.0],
             [650.0, 50.0],
             [850.0, 50.0],
             [1050.0, 50.0],
+            [1250.0, 50.0],
         ];
         let labels = vec![
             String::from("My class"),
+            String::from("Rdfs class"),
+            String::from("Rdfs resource"),
             String::from("Loooooooong class"),
             String::from("Thing"),
             String::from("Equivalent"),
             String::from("Deprecated"),
             String::new(),
+            String::from("Literal"),
         ];
 
         let node_types = [
             NodeType::Class,
+            NodeType::RdfsClass,
+            NodeType::RdfsResource,
             NodeType::ExternalClass,
             NodeType::Thing,
             NodeType::EquivalentClass,
             NodeType::DeprecatedClass,
             NodeType::AnonymousClass,
+            NodeType::Literal,
         ];
 
         // Combine positions and types into NodeInstance entries
@@ -424,7 +433,7 @@ impl State {
             let mut buf = GlyphBuffer::new(&mut font_system, Metrics::new(font_px, line_px));
             // per-label size (in physical pixels)
             // TODO: update if we implement dynamic node size
-            let label_width = 96.0 * scale;
+            let label_width = 90.0 * scale;
             let label_height = 24.0 * scale;
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
             // sample label using the NodeType
