@@ -7,6 +7,7 @@ pub enum NodeType {
     DisjointUntion,
     Intersection,
     Complement,
+    DeprecatedClass,
     AnonymousClass,
     Literal,
     RdfsClass,

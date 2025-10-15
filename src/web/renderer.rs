@@ -165,12 +165,19 @@ impl State {
         });
 
         // TODO: remove test code after adding simulator
-        let positions = [[50.0, 50.0], [250.0, 250.0], [450.0, 450.0], [650.0, 50.0]];
+        let positions = [
+            [50.0, 50.0],
+            [250.0, 250.0],
+            [450.0, 450.0],
+            [650.0, 50.0],
+            [850.0, 50.0],
+        ];
         let labels = vec![
             String::from("My class"),
             String::from("Loooooooong class"),
             String::from("Thing"),
             String::from("Equivalent"),
+            String::new(),
         ];
 
         let node_types = [
@@ -178,6 +185,7 @@ impl State {
             NodeType::ExternalClass,
             NodeType::Thing,
             NodeType::EquivalentClass,
+            NodeType::DeprecatedClass,
         ];
 
         // Combine positions and types into NodeInstance entries
@@ -408,7 +416,7 @@ impl State {
         for label in self.labels.clone() {
             // TODO: handle node types with default text, e.g. external class
             // TODO: combine EquivalentClass nodes
-            let font_px = 16.0 * scale; // font size in physical pixels
+            let font_px = 14.0 * scale; // font size in physical pixels
             let line_px = 28.0 * scale;
             let mut buf = GlyphBuffer::new(&mut font_system, Metrics::new(font_px, line_px));
             // per-label size (in physical pixels)

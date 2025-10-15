@@ -48,7 +48,7 @@ fn vs_node_main(
 }
 
 // parameters
-const BORDER_THICKNESS = 0.05;   // how thick the border ring is
+const BORDER_THICKNESS = 0.03;   // how thick the border ring is
 const EDGE_SOFTNESS    = 0.02;   // anti-aliasing
 // polar angle based repeating pattern (dotted border)
 const PI = 3.14159265;
@@ -204,6 +204,35 @@ fn draw_complement(v_uv: vec2<f32>)  -> vec4<f32> {
     return vec4<f32>(0.0); // TODO: implement
 }
 
+fn draw_deprecated_class(v_uv: vec2<f32>)  -> vec4<f32> {
+    let d = distance(v_uv, vec2<f32>(0.5, 0.5));
+    let r = 0.48;
+    // smooth fill mask (circle inside without border)
+    var fill_mask = 1.0 - smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d);
+
+    // smooth border mask (ring around circle)
+    var border_mask = smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d)
+                    * (1.0 - smoothstep(r, r + EDGE_SOFTNESS, d));
+
+    let fill_color = vec3<f32>(0.6038);
+
+    let border_color = vec3<f32>(0.0, 0.0, 0.0);
+    let background = vec3<f32>(0.84, 0.87, 0.88);
+
+    // blend smoothly: background -> border -> fill
+    var col = mix(background, border_color, border_mask);
+    col = mix(col, fill_color, fill_mask);
+
+    // blend smoothly: background -> border -> fill
+    col = mix(background, border_color, border_mask);
+    col = mix(col, fill_color, fill_mask);
+
+    // smooth alpha (fill + border)
+    let alpha = clamp(fill_mask + border_mask, 0.0, 1.0);
+
+    return vec4<f32>(col, alpha);
+}
+
 fn draw_anonymous_class(v_uv: vec2<f32>)  -> vec4<f32> {
     return vec4<f32>(0.0); // TODO: implement
 }
@@ -244,15 +273,18 @@ fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>) -> vec4<f32> {
             return draw_complement(v_uv);
         }
         case 7: {
-            return draw_anonymous_class(v_uv);
+            return draw_deprecated_class(v_uv);
         }
         case 8: {
-            return draw_literal(v_uv);
+            return draw_anonymous_class(v_uv);
         }
         case 9: {
-            return draw_rdfs_class(v_uv);
+            return draw_literal(v_uv);
         }
         case 10: {
+            return draw_rdfs_class(v_uv);
+        }
+        case 11: {
             return draw_rdfs_resource(v_uv);
         }
         default: {
