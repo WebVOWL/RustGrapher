@@ -217,6 +217,7 @@ impl CalculateNodeForce {
 
 impl<'a> System<'a> for CalculateNodeForce {
     type SystemData = (
+        Entities<'a>,
         ReadStorage<'a, Position>,
         ReadStorage<'a, Mass>,
         ReadStorage<'a, Fixed>,
@@ -228,11 +229,20 @@ impl<'a> System<'a> for CalculateNodeForce {
 
     fn run(
         &mut self,
-        (positions, masses, fixed, mut node_forces, quadtree, theta, repel_force): Self::SystemData,
+        (
+            entities,
+            positions,
+            masses,
+            fixed,
+            mut node_forces,
+            quadtree,
+            theta,
+            repel_force,
+        ): Self::SystemData,
     ) {
-        (&positions, &masses, !&fixed, &mut node_forces)
+        (&*entities, &positions, &masses, !&fixed, &mut node_forces)
             .par_join()
-            .for_each(|(pos, mass, (), node_forces)| {
+            .for_each(|(entity, pos, mass, (), node_forces)| {
                 let node_approximations = quadtree.stack(&pos.0, theta.0);
 
                 for node_approximation in node_approximations {
@@ -242,6 +252,16 @@ impl<'a> System<'a> for CalculateNodeForce {
                         mass.0,
                         node_approximation.mass(),
                         repel_force.0,
+                    );
+                    info!(
+                        "(CNF) [{0}] f: {1} | p: {2} | nap: {3} | m: {4} | nam: {5} | Rrf: {6}",
+                        entity.id(),
+                        node_forces.0,
+                        pos.0,
+                        node_approximation.position(),
+                        mass.0,
+                        node_approximation.mass(),
+                        repel_force.0
                     );
                 }
             });
@@ -270,16 +290,26 @@ struct ApplyNodeForce;
 
 impl<'a> System<'a> for ApplyNodeForce {
     type SystemData = (
+        Entities<'a>,
         ReadStorage<'a, NodeForces>,
         WriteStorage<'a, Velocity>,
         ReadStorage<'a, Mass>,
         Read<'a, DeltaTime>,
     );
 
-    fn run(&mut self, (forces, mut velocities, masses, delta_time): Self::SystemData) {
-        for (force, velocity, mass) in (&forces, &mut velocities, &masses).join() {
+    fn run(&mut self, (entities, forces, mut velocities, masses, delta_time): Self::SystemData) {
+        for (entity, force, velocity, mass) in
+            (&*entities, &forces, &mut velocities, &masses).join()
+        {
             velocity.0 += force.0 / mass.0 * delta_time.0;
-            info!("{0}", velocity.0);
+            info!(
+                "(ANF) [{0}] v: {1} | f: {2} | m: {3} | d: {4}",
+                entity.id(),
+                velocity.0,
+                force.0,
+                mass.0,
+                delta_time.0
+            );
         }
     }
 }
@@ -358,6 +388,17 @@ impl<'a> System<'a> for UpdateEdgeForces {
 
             let _ = forces.insert(rb1, NodeForces(rb1_force.clone() - spring_force));
             let _ = forces.insert(rb2, NodeForces(rb2_force.clone() + spring_force));
+            info!(
+                "(UEF) S[{0}] f: {1} | T[{2}] f: {3} | dv: {4} | fm: {5} | sf: {6} | st: {7}",
+                rb1.id(),
+                rb1_force,
+                rb2.id(),
+                rb2_force,
+                direction_vec,
+                force_magnitude,
+                spring_force,
+                spring_stiffness.0
+            );
         }
     }
 }
