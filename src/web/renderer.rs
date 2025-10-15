@@ -171,12 +171,14 @@ impl State {
             [450.0, 450.0],
             [650.0, 50.0],
             [850.0, 50.0],
+            [1050.0, 50.0],
         ];
         let labels = vec![
             String::from("My class"),
             String::from("Loooooooong class"),
             String::from("Thing"),
             String::from("Equivalent"),
+            String::from("Deprecated"),
             String::new(),
         ];
 
@@ -186,6 +188,7 @@ impl State {
             NodeType::Thing,
             NodeType::EquivalentClass,
             NodeType::DeprecatedClass,
+            NodeType::AnonymousClass,
         ];
 
         // Combine positions and types into NodeInstance entries

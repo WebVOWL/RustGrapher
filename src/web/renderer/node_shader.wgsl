@@ -234,7 +234,39 @@ fn draw_deprecated_class(v_uv: vec2<f32>)  -> vec4<f32> {
 }
 
 fn draw_anonymous_class(v_uv: vec2<f32>)  -> vec4<f32> {
-    return vec4<f32>(0.0); // TODO: implement
+    let d = distance(v_uv, vec2<f32>(0.5, 0.5));
+    let r = 0.48;
+    // smooth fill mask (circle inside without border)
+    var fill_mask = 1.0 - smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d);
+
+    // smooth border mask (ring around circle)
+    var border_mask = smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d)
+                    * (1.0 - smoothstep(r, r + EDGE_SOFTNESS, d));
+
+    let center = vec2(0.5, 0.5);
+    let dir = v_uv - center;
+    let angle = atan2(dir.y, dir.x);          // -PI..PI
+    let ang01 = angle / (2.0 * PI) + 0.5;     // 0..1
+    let p = fract(ang01 * DOT_COUNT);         // 0..1 per dot segment
+    let distToDot = abs(p - 0.5);             // distance from center of dot segment
+    let dot_mask = 1.0 - smoothstep(DOT_RADIUS - DOT_EDGE, DOT_RADIUS + DOT_EDGE, distToDot);
+
+    // apply dot mask to border mask so the ring becomes dotted
+    border_mask *= dot_mask;
+
+    let fill_color = vec3<f32>(0.40724, 0.60383, 1.0);
+
+    let border_color = vec3(0.0, 0.0, 0.0);
+    let background = vec3(0.84, 0.87, 0.88);
+
+    // blend smoothly: background -> border -> fill
+    var col = mix(background, border_color, border_mask);
+    col = mix(col, fill_color, fill_mask);
+
+    // smooth alpha (fill + border)
+    let alpha = clamp(fill_mask + border_mask, 0.0, 1.0);
+
+    return vec4<f32>(col, alpha);
 }
 
 fn draw_literal(v_uv: vec2<f32>)  -> vec4<f32> {
