@@ -447,7 +447,7 @@ pub struct SimulatorBuilder {
     spring_neutral_length: f32,
     delta_time: f32,
     gravity_force: f32,
-    repel_force_const: f32,
+    repel_force: f32,
     damping: f32,
     quadtree_theta: f32,
     freeze_thresh: f32,
@@ -492,7 +492,7 @@ impl SimulatorBuilder {
     ///
     /// Default: `100.0`
     pub fn repel_force(mut self, repel_force_const: f32) -> Self {
-        self.repel_force_const = repel_force_const;
+        self.repel_force = repel_force_const;
         self
     }
 
@@ -585,7 +585,7 @@ impl SimulatorBuilder {
     }
 
     fn add_ressources(self: Self, world: &mut World) {
-        world.insert(RepelForce(self.repel_force_const));
+        world.insert(RepelForce(self.repel_force));
         world.insert(SpringStiffness(self.spring_stiffness));
         world.insert(SpringNeutralLength(self.spring_neutral_length));
         world.insert(GravityForce(self.gravity_force));
@@ -628,7 +628,7 @@ impl Default for SimulatorBuilder {
     /// Get a Instance of `SimulatorBuilder` with default values
     fn default() -> Self {
         Self {
-            repel_force_const: 100.0,
+            repel_force: 100.0,
             spring_stiffness: 100.0,
             spring_neutral_length: 2.0,
             gravity_force: 1.0,
