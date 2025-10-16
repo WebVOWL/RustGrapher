@@ -274,13 +274,14 @@ impl<'a> System<'a> for CalculateGravityForce {
     type SystemData = (
         ReadStorage<'a, Position>,
         ReadStorage<'a, Mass>,
+        ReadStorage<'a, Fixed>,
         WriteStorage<'a, NodeForces>,
         Read<'a, GravityForce>,
     );
 
     // compute_center_gravity()
-    fn run(&mut self, (positions, masses, mut forces, gravity_force): Self::SystemData) {
-        for (pos, mass, force) in (&positions, &masses, &mut forces).join() {
+    fn run(&mut self, (positions, masses, fixed, mut forces, gravity_force): Self::SystemData) {
+        for (pos, mass, _, force) in (&positions, &masses, !&fixed, &mut forces).join() {
             force.0 += -pos.0 * mass.0 * gravity_force.0;
         }
     }
@@ -291,15 +292,19 @@ struct ApplyNodeForce;
 impl<'a> System<'a> for ApplyNodeForce {
     type SystemData = (
         Entities<'a>,
+        ReadStorage<'a, Fixed>,
         ReadStorage<'a, NodeForces>,
         WriteStorage<'a, Velocity>,
         ReadStorage<'a, Mass>,
         Read<'a, DeltaTime>,
     );
 
-    fn run(&mut self, (entities, forces, mut velocities, masses, delta_time): Self::SystemData) {
-        for (entity, force, velocity, mass) in
-            (&*entities, &forces, &mut velocities, &masses).join()
+    fn run(
+        &mut self,
+        (entities, fixed, forces, mut velocities, masses, delta_time): Self::SystemData,
+    ) {
+        for (entity, _, force, velocity, mass) in
+            (&entities, !&fixed, &forces, &mut velocities, &masses).join()
         {
             velocity.0 += force.0 / mass.0 * delta_time.0;
             info!(
@@ -334,24 +339,36 @@ impl<'a> System<'a> for UpdateNodePosition {
             entities,
             mut positions,
             mut velocities,
-            fixeds,
+            fixed,
             delta_time,
             damping,
             freeze_threshold,
             updater,
         ): Self::SystemData,
     ) {
-        for (velocity, _) in (&mut velocities, &fixeds).join() {
-            velocity.0 = Vec2::ZERO;
-        }
-        for (pos, velocity, _) in (&mut positions, &mut velocities, !&fixeds).join() {
+        // for (entity, velocity, _) in (&entities, &mut velocities, &fixeds).join() {
+        //     if freeze_threshold.0 < velocity.0.abs().length() {
+        //         // Update is only visible next dispatch
+        //         updater.remove::<Fixed>(entity);
+        //     }
+        // }
+
+        for (entity, pos, velocity, _) in
+            (&entities, &mut positions, &mut velocities, !&fixed).join()
+        {
             velocity.0 *= damping.0;
 
             pos.0 += velocity.0 * delta_time.0;
 
+            info!(
+                "freeze_threshold.0, {0} > velocity.0.abs().length(), {1}",
+                freeze_threshold.0,
+                velocity.0.abs().length()
+            );
             if freeze_threshold.0 > velocity.0.abs().length() {
-                let fixed = entities.create();
-                updater.insert(fixed, Fixed);
+                // Update is only visible next dispatch
+                updater.insert(entity, Fixed);
+                velocity.0 = Vec2::ZERO;
             }
         }
     }
@@ -362,6 +379,7 @@ struct UpdateEdgeForces;
 impl<'a> System<'a> for UpdateEdgeForces {
     type SystemData = (
         ReadStorage<'a, Connects>,
+        ReadStorage<'a, Fixed>,
         WriteStorage<'a, NodeForces>,
         ReadStorage<'a, Position>,
         Read<'a, SpringStiffness>,
@@ -370,7 +388,7 @@ impl<'a> System<'a> for UpdateEdgeForces {
 
     fn run(
         &mut self,
-        (connections, mut forces, positions, spring_stiffness, spring_neutral_length): Self::SystemData,
+        (connections, fixed, mut forces, positions, spring_stiffness, spring_neutral_length): Self::SystemData,
     ) {
         for connection in (&connections).join() {
             let rb1 = connection.src;
@@ -383,11 +401,16 @@ impl<'a> System<'a> for UpdateEdgeForces {
 
             let spring_force = direction_vec.normalize_or(Vec2::ZERO) * -force_magnitude;
 
+            // TODO: Move into if-block below when testing is done
             let rb1_force = forces.get(rb1).unwrap().0;
+            if !fixed.contains(rb1) {
+                let _ = forces.insert(rb1, NodeForces(rb1_force.clone() - spring_force));
+            }
+            // TODO: Move into if-block below when testing is done
             let rb2_force = forces.get(rb2).unwrap().0;
-
-            let _ = forces.insert(rb1, NodeForces(rb1_force.clone() - spring_force));
-            let _ = forces.insert(rb2, NodeForces(rb2_force.clone() + spring_force));
+            if !fixed.contains(rb2) {
+                let _ = forces.insert(rb2, NodeForces(rb2_force.clone() + spring_force));
+            }
             info!(
                 "(UEF) S[{0}] f: {1} | T[{2}] f: {3} | dv: {4} | fm: {5} | sf: {6} | st: {7}",
                 rb1.id(),
@@ -629,12 +652,12 @@ impl Default for SimulatorBuilder {
         Self {
             repel_force: 100.0,
             spring_stiffness: 100.0,
-            spring_neutral_length: 1000.0,
-            gravity_force: 1.0,
+            spring_neutral_length: 200.0,
+            gravity_force: 10.0,
             delta_time: 0.005,
-            damping: 0.9,
+            damping: 0.5,
             quadtree_theta: 0.75,
-            freeze_thresh: 2.0,
+            freeze_thresh: 20.0,
         }
     }
 }
