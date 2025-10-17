@@ -3,7 +3,7 @@ mod vertex_buffer;
 
 use glam::Vec2;
 use log::info;
-use std::{cmp::min, sync::Arc};
+use std::{cmp::max, cmp::min, sync::Arc};
 use wgpu::util::DeviceExt;
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::EventLoopExtWebSys;
@@ -445,11 +445,12 @@ impl State {
             let label_width = 90.0 * scale;
             let label_height = match self.node_types[i] {
                 NodeType::ExternalClass | NodeType::DeprecatedClass | NodeType::EquivalentClass => {
-                    24.0 * scale
+                    48.0 * scale
                 }
-                _ => 12.0 * scale,
+                _ => 24.0 * scale,
             };
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
+            buf.set_wrap(&mut font_system, glyphon::Wrap::None);
             // sample label using the NodeType
             let attrs = &Attrs::new().family(Family::SansSerif);
             let spans = match self.node_types[i] {
