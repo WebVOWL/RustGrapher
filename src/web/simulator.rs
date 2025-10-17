@@ -378,6 +378,7 @@ struct UpdateEdgeForces;
 
 impl<'a> System<'a> for UpdateEdgeForces {
     type SystemData = (
+        Entities<'a>,
         ReadStorage<'a, Connects>,
         ReadStorage<'a, Fixed>,
         WriteStorage<'a, NodeForces>,
@@ -388,40 +389,45 @@ impl<'a> System<'a> for UpdateEdgeForces {
 
     fn run(
         &mut self,
-        (connections, fixed, mut forces, positions, spring_stiffness, spring_neutral_length): Self::SystemData,
+        (
+            entities,
+            connections,
+            fixed,
+            mut forces,
+            positions,
+            spring_stiffness,
+            spring_neutral_length,
+        ): Self::SystemData,
     ) {
-        for connection in (&connections).join() {
-            let rb1 = connection.src;
-            let rb2 = connection.target;
+        for (entity, position, connects, _) in
+            (&*entities, &positions, &connections, !&fixed).join()
+        {
+            let rb1 = entity;
+            for rb2 in &connects.targets {
+                let direction_vec = positions.get(*rb2).unwrap().0 - position.0;
 
-            let direction_vec = positions.get(rb2).unwrap().0 - positions.get(rb1).unwrap().0;
+                let force_magnitude =
+                    spring_stiffness.0 * (direction_vec.length() - spring_neutral_length.0);
 
-            let force_magnitude =
-                spring_stiffness.0 * (direction_vec.length() - spring_neutral_length.0);
+                let spring_force = direction_vec.normalize_or(Vec2::ZERO) * -force_magnitude;
 
-            let spring_force = direction_vec.normalize_or(Vec2::ZERO) * -force_magnitude;
+                let rb1_force = forces.get(rb1).unwrap().0;
+                let rb2_force = forces.get(*rb2).unwrap().0;
 
-            // TODO: Move into if-block below when testing is done
-            let rb1_force = forces.get(rb1).unwrap().0;
-            if !fixed.contains(rb1) {
                 let _ = forces.insert(rb1, NodeForces(rb1_force.clone() - spring_force));
+                let _ = forces.insert(*rb2, NodeForces(rb2_force.clone() + spring_force));
+                info!(
+                    "(UEF) S[{0}] f: {1} | T[{2}] f: {3} | dv: {4} | fm: {5} | sf: {6} | st: {7}",
+                    entity.id(),
+                    rb1_force,
+                    rb2.id(),
+                    rb2_force,
+                    direction_vec,
+                    force_magnitude,
+                    spring_force,
+                    spring_stiffness.0
+                );
             }
-            // TODO: Move into if-block below when testing is done
-            let rb2_force = forces.get(rb2).unwrap().0;
-            if !fixed.contains(rb2) {
-                let _ = forces.insert(rb2, NodeForces(rb2_force.clone() + spring_force));
-            }
-            info!(
-                "(UEF) S[{0}] f: {1} | T[{2}] f: {3} | dv: {4} | fm: {5} | sf: {6} | st: {7}",
-                rb1.id(),
-                rb1_force,
-                rb2.id(),
-                rb2_force,
-                direction_vec,
-                force_magnitude,
-                spring_force,
-                spring_stiffness.0
-            );
         }
     }
 }
@@ -616,9 +622,10 @@ impl SimulatorBuilder {
         world.insert(QuadTree::default());
     }
 
-    fn create_entities(world: &mut World, nodes: Vec<Vec2>, edges: Vec<Vec2>) -> Vec<Entity> {
+    fn create_entities(world: &mut World, nodes: Vec<Vec2>, edges: Vec<[u32; 2]>) {
         let mut node_entities = Vec::with_capacity(nodes.len());
 
+        // Create node entities
         for node in nodes {
             let node_entity = world
                 .create_entity()
@@ -630,17 +637,26 @@ impl SimulatorBuilder {
             node_entities.push(node_entity);
         }
 
-        for edge in edges {
-            world
-                .create_entity()
-                .with(Connects {
-                    src: node_entities[edge.x as usize],
-                    target: node_entities[edge.y as usize],
-                })
-                .build();
+        // Create edge components between nodes
+        let mut edge_components: HashMap<u32, Connects> = HashMap::new();
+        for edge in edges.iter() {
+            // x == edge[0], y == edge[1]
+            if let Some(connections) = edge_components.get_mut(&edge[0]) {
+                connections.targets.push(node_entities[edge[1] as usize])
+            } else {
+                let new_connects = Connects {
+                    targets: vec![node_entities[edge[1] as usize]],
+                };
+                edge_components.insert(edge[0], new_connects);
+            }
         }
 
-        node_entities
+        // Add edge components to node entities
+        let updater = world.read_resource::<LazyUpdate>();
+        for (src, targets) in edge_components {
+            let node = node_entities[src as usize];
+            updater.insert(node, targets);
+        }
     }
 }
 
