@@ -182,7 +182,7 @@ impl State {
             String::from("Rdfs resource"),
             String::from("Loooooooong class"),
             String::from("Thing"),
-            String::from("Equivalent"),
+            String::from("Equivalent1-Equivalent2"),
             String::from("Deprecated"),
             String::new(),
             String::from("Literal"),
@@ -426,7 +426,6 @@ impl State {
         let scale = self.window.scale_factor() as f32;
         let mut text_buffers: Vec<GlyphBuffer> = Vec::new();
         for (i, label) in self.labels.clone().iter().enumerate() {
-            // TODO: handle node types with default text, e.g. external class
             // TODO: combine EquivalentClass nodes
             let font_px = 12.0 * scale; // font size in physical pixels
             let line_px = 12.0 * scale;
@@ -435,17 +434,40 @@ impl State {
             // TODO: update if we implement dynamic node size
             let label_width = 90.0 * scale;
             let label_height = match self.node_types[i] {
-                NodeType::ExternalClass => 48.0 * scale,
+                NodeType::ExternalClass | NodeType::DeprecatedClass | NodeType::EquivalentClass => {
+                    48.0 * scale
+                }
                 _ => 24.0 * scale,
             };
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
             // sample label using the NodeType
             let attrs = &Attrs::new().family(Family::SansSerif);
             let spans = match self.node_types[i] {
+                NodeType::EquivalentClass => {
+                    let labels: Vec<&str> = label.split('-').collect(); // TODO: update when equivalent classes are loaded from ontology
+                    let label1 = labels.get(0).map_or("", |v| v);
+                    let label2 = labels.get(1).map_or("", |v| v);
+                    vec![
+                        (label1, attrs.clone()),
+                        ("\n", attrs.clone()),
+                        (label2, attrs.clone()),
+                    ]
+                }
                 NodeType::ExternalClass => vec![
                     (label.as_str(), attrs.clone()),
-                    ("\n(external)", attrs.clone()),
+                    (
+                        "\n(external)",
+                        attrs.clone().metrics(Metrics::new(font_px - 5.0, line_px)),
+                    ),
                 ],
+                NodeType::DeprecatedClass => vec![
+                    (label.as_str(), attrs.clone()),
+                    (
+                        "\n(deprecated)",
+                        attrs.clone().metrics(Metrics::new(font_px - 5.0, line_px)),
+                    ),
+                ],
+                NodeType::Thing => vec![("Thing", attrs.clone())],
                 _ => vec![(label.as_str(), attrs.clone())],
             };
             buf.set_rich_text(
