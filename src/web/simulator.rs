@@ -1,6 +1,8 @@
 pub mod components;
 mod ressources;
 
+use std::{collections::HashMap, ops::Deref};
+
 use crate::web::{
     quadtree::{BoundingBox2D, QuadTree},
     simulator::{
@@ -24,11 +26,12 @@ use crate::web::{
 use glam::Vec2;
 use log::info;
 use rayon::prelude::*;
-use specs::prelude::*;
 use specs::{
     Builder, Dispatcher, DispatcherBuilder, Entities, Join, LazyUpdate, ParJoin, Read, ReadExpect,
     ReadStorage, ReaderId, System, World, WorldExt, Write, WriteStorage,
 };
+use specs::{prelude::*, world::LazyBuilder};
+use web_sys::Event;
 
 #[derive(Default)]
 struct EventManager {
@@ -221,6 +224,7 @@ impl<'a> System<'a> for CalculateNodeForce {
         ReadStorage<'a, Position>,
         ReadStorage<'a, Mass>,
         ReadStorage<'a, Fixed>,
+        ReadStorage<'a, Dragged>,
         WriteStorage<'a, NodeForces>,
         ReadExpect<'a, QuadTree>,
         Read<'a, QuadTreeTheta>,
@@ -234,15 +238,23 @@ impl<'a> System<'a> for CalculateNodeForce {
             positions,
             masses,
             fixed,
+            dragged,
             mut node_forces,
             quadtree,
             theta,
             repel_force,
         ): Self::SystemData,
     ) {
-        (&*entities, &positions, &masses, !&fixed, &mut node_forces)
+        (
+            &*entities,
+            &positions,
+            &masses,
+            &mut node_forces,
+            !&fixed,
+            !&dragged,
+        )
             .par_join()
-            .for_each(|(entity, pos, mass, (), node_forces)| {
+            .for_each(|(entity, pos, mass, node_forces, _, _)| {
                 let node_approximations = quadtree.stack(&pos.0, theta.0);
 
                 for node_approximation in node_approximations {
@@ -272,6 +284,7 @@ struct CalculateGravityForce;
 
 impl<'a> System<'a> for CalculateGravityForce {
     type SystemData = (
+        Entities<'a>,
         ReadStorage<'a, Position>,
         ReadStorage<'a, Mass>,
         ReadStorage<'a, Fixed>,
@@ -613,7 +626,7 @@ impl SimulatorBuilder {
     }
 
     /// Constructs a instance of `Simulator`
-    pub fn build<'a, 'b>(self, nodes: Vec<Vec2>, edges: Vec<Vec2>) -> Simulator<'a, 'b> {
+    pub fn build<'a, 'b>(self, nodes: Vec<Vec2>, edges: Vec<[u32; 2]>) -> Simulator<'a, 'b> {
         let mut world = World::new();
         let mut dispatcher = DispatcherBuilder::new()
             .with(EventManager::default(), "event_manager", &[])
@@ -704,9 +717,9 @@ impl Default for SimulatorBuilder {
             repel_force: 100.0,
             spring_stiffness: 100.0,
             spring_neutral_length: 200.0,
-            gravity_force: 10.0,
+            gravity_force: 1.0,
             delta_time: 0.005,
-            damping: 0.5,
+            damping: 0.9,
             quadtree_theta: 0.75,
             freeze_thresh: 20.0,
         }
