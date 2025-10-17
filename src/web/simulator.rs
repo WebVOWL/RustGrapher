@@ -280,10 +280,23 @@ impl<'a> System<'a> for CalculateGravityForce {
     );
 
     // compute_center_gravity()
-    fn run(&mut self, (positions, masses, fixed, mut forces, gravity_force): Self::SystemData) {
-        for (pos, mass, _, force) in (&positions, &masses, !&fixed, &mut forces).join() {
-            force.0 += -pos.0 * mass.0 * gravity_force.0;
-        }
+    fn run(
+        &mut self,
+        (entities, positions, masses, fixed, mut forces, gravity_force): Self::SystemData,
+    ) {
+        (&entities, &positions, &masses, !&fixed, &mut forces)
+            .par_join()
+            .for_each(|(entity, pos, mass, _, force)| {
+                force.0 += -pos.0 * mass.0 * gravity_force.0;
+                info!(
+                    "(CGF) [{0}] f: {1} | p: {2} | m: {3} | g: {4}",
+                    entity.id(),
+                    force.0,
+                    pos.0,
+                    mass.0,
+                    gravity_force.0
+                );
+            });
     }
 }
 
@@ -303,19 +316,19 @@ impl<'a> System<'a> for ApplyNodeForce {
         &mut self,
         (entities, fixed, forces, mut velocities, masses, delta_time): Self::SystemData,
     ) {
-        for (entity, _, force, velocity, mass) in
-            (&entities, !&fixed, &forces, &mut velocities, &masses).join()
-        {
-            velocity.0 += force.0 / mass.0 * delta_time.0;
-            info!(
-                "(ANF) [{0}] v: {1} | f: {2} | m: {3} | d: {4}",
-                entity.id(),
-                velocity.0,
-                force.0,
-                mass.0,
-                delta_time.0
-            );
-        }
+        (&entities, !&fixed, &forces, &mut velocities, &masses)
+            .par_join()
+            .for_each(|(entity, _, force, velocity, mass)| {
+                velocity.0 += force.0 / mass.0 * delta_time.0;
+                info!(
+                    "(ANF) [{0}] v: {1} | f: {2} | m: {3} | d: {4}",
+                    entity.id(),
+                    velocity.0,
+                    force.0,
+                    mass.0,
+                    delta_time.0
+                );
+            });
     }
 }
 
@@ -353,24 +366,24 @@ impl<'a> System<'a> for UpdateNodePosition {
         //     }
         // }
 
-        for (entity, pos, velocity, _) in
-            (&entities, &mut positions, &mut velocities, !&fixed).join()
-        {
-            velocity.0 *= damping.0;
+        (&entities, &mut positions, &mut velocities, !&fixed)
+            .par_join()
+            .for_each(|(entity, pos, velocity, _)| {
+                velocity.0 *= damping.0;
 
-            pos.0 += velocity.0 * delta_time.0;
+                pos.0 += velocity.0 * delta_time.0;
 
-            info!(
-                "freeze_threshold.0, {0} > velocity.0.abs().length(), {1}",
-                freeze_threshold.0,
-                velocity.0.abs().length()
-            );
-            if freeze_threshold.0 > velocity.0.abs().length() {
-                // Update is only visible next dispatch
-                updater.insert(entity, Fixed);
-                velocity.0 = Vec2::ZERO;
-            }
-        }
+                info!(
+                    "freeze_threshold.0, {0} > velocity.0.abs().length(), {1}",
+                    freeze_threshold.0,
+                    velocity.0.abs().length()
+                );
+                if freeze_threshold.0 > velocity.0.abs().length() {
+                    // Update is only visible next dispatch
+                    updater.insert(entity, Fixed);
+                    velocity.0 = Vec2::ZERO;
+                }
+            });
     }
 }
 
