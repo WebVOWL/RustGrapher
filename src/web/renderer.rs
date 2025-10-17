@@ -175,6 +175,10 @@ impl State {
             [850.0, 50.0],
             [1050.0, 50.0],
             [1250.0, 50.0],
+            [450.0, 250.0],
+            [650.0, 250.0],
+            [850.0, 250.0],
+            [1050.0, 250.0],
         ];
         let labels = vec![
             String::from("My class"),
@@ -186,6 +190,10 @@ impl State {
             String::from("Deprecated"),
             String::new(),
             String::from("Literal"),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
         ];
 
         let node_types = [
@@ -198,6 +206,10 @@ impl State {
             NodeType::DeprecatedClass,
             NodeType::AnonymousClass,
             NodeType::Literal,
+            NodeType::Complement,
+            NodeType::DisjointUnion,
+            NodeType::Intersection,
+            NodeType::Union,
         ];
 
         // Combine positions and types into NodeInstance entries
@@ -399,8 +411,7 @@ impl State {
         }
 
         // Embed font bytes into the binary
-        const DEFAULT_FONT_BYTES: &'static [u8] = include_bytes!("../../assets/OpenSans.ttf");
-        // log::info!("Font size: {} bytes", DEFAULT_FONT_BYTES.len());
+        const DEFAULT_FONT_BYTES: &'static [u8] = include_bytes!("../../assets/DejaVuSans.ttf");
 
         let mut font_system = FontSystem::new_with_fonts(core::iter::once(
             glyphon::fontdb::Source::Binary(Arc::new(DEFAULT_FONT_BYTES.to_vec())),
@@ -426,7 +437,6 @@ impl State {
         let scale = self.window.scale_factor() as f32;
         let mut text_buffers: Vec<GlyphBuffer> = Vec::new();
         for (i, label) in self.labels.clone().iter().enumerate() {
-            // TODO: combine EquivalentClass nodes
             let font_px = 12.0 * scale; // font size in physical pixels
             let line_px = 12.0 * scale;
             let mut buf = GlyphBuffer::new(&mut font_system, Metrics::new(font_px, line_px));
@@ -435,9 +445,9 @@ impl State {
             let label_width = 90.0 * scale;
             let label_height = match self.node_types[i] {
                 NodeType::ExternalClass | NodeType::DeprecatedClass | NodeType::EquivalentClass => {
-                    48.0 * scale
+                    24.0 * scale
                 }
-                _ => 24.0 * scale,
+                _ => 12.0 * scale,
             };
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
             // sample label using the NodeType
@@ -457,17 +467,21 @@ impl State {
                     (label.as_str(), attrs.clone()),
                     (
                         "\n(external)",
-                        attrs.clone().metrics(Metrics::new(font_px - 5.0, line_px)),
+                        attrs.clone().metrics(Metrics::new(font_px - 3.0, line_px)),
                     ),
                 ],
                 NodeType::DeprecatedClass => vec![
                     (label.as_str(), attrs.clone()),
                     (
                         "\n(deprecated)",
-                        attrs.clone().metrics(Metrics::new(font_px - 5.0, line_px)),
+                        attrs.clone().metrics(Metrics::new(font_px - 3.0, line_px)),
                     ),
                 ],
                 NodeType::Thing => vec![("Thing", attrs.clone())],
+                NodeType::Complement => vec![("¬", attrs.clone())],
+                NodeType::DisjointUnion => vec![("1", attrs.clone())],
+                NodeType::Intersection => vec![("∩", attrs.clone())],
+                NodeType::Union => vec![("∪", attrs.clone())],
                 _ => vec![(label.as_str(), attrs.clone())],
             };
             buf.set_rich_text(

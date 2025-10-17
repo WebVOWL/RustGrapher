@@ -94,7 +94,7 @@ fn draw_class(v_uv: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(col, alpha);
 }
 
-fn draw_subclass(v_uv: vec2<f32>)  -> vec4<f32> {
+fn draw_subclass(v_uv: vec2<f32>) -> vec4<f32> {
     let d = distance(v_uv, vec2<f32>(0.5, 0.5));
     let r = 0.48;
     // smooth fill mask (circle inside without border)
@@ -119,7 +119,7 @@ fn draw_subclass(v_uv: vec2<f32>)  -> vec4<f32> {
     return vec4<f32>(col, alpha);
 }
 
-fn draw_thing(v_uv: vec2<f32>)  -> vec4<f32> {
+fn draw_thing(v_uv: vec2<f32>) -> vec4<f32> {
     let d = distance(v_uv, vec2<f32>(0.5, 0.5));
     let r = 0.43;
     // smooth fill mask (circle inside without border)
@@ -154,7 +154,7 @@ fn draw_thing(v_uv: vec2<f32>)  -> vec4<f32> {
     return vec4<f32>(col, alpha);
 }
 
-fn draw_equivalent_class(v_uv: vec2<f32>)  -> vec4<f32> {
+fn draw_equivalent_class(v_uv: vec2<f32>) -> vec4<f32> {
     let d = distance(v_uv, vec2<f32>(0.5, 0.5));
     let r = 0.48;
 
@@ -178,7 +178,6 @@ fn draw_equivalent_class(v_uv: vec2<f32>)  -> vec4<f32> {
 
     let border_color = vec3<f32>(0.0, 0.0, 0.0);
 
-    // blend smoothly: background -> border -> fill
     var col = mix(BACKGROUND_COLOR, border_color, outer_border_mask);
     col = mix(col, border_color, inner_border_mask);
     col = mix(col, fill_color, fill_mask);
@@ -189,19 +188,181 @@ fn draw_equivalent_class(v_uv: vec2<f32>)  -> vec4<f32> {
     return vec4<f32>(col, alpha);
 }
 
-fn draw_disjoint_union(v_uv: vec2<f32>)  -> vec4<f32> {
-    return vec4<f32>(0.0); // TODO: implement
+fn draw_union(v_uv: vec2<f32>) -> vec4<f32> {
+    let r = 0.48;
+    let border_gap = 0.35;
+
+    // outer circle
+    let d_outer = distance(v_uv, vec2<f32>(0.5, 0.5));
+
+    // radius of the inner border
+    let inner_border_outer_r = r - BORDER_THICKNESS * 0.7 - border_gap;
+    let inner_border_inner_r = inner_border_outer_r - BORDER_THICKNESS * 0.7;
+
+    // positions for two overlapping inner circles
+    let offset = 0.05;
+    let c1 = vec2<f32>(0.5 - offset, 0.5);
+    let c2 = vec2<f32>(0.5 + offset, 0.5);
+
+    let d1 = distance(v_uv, c1);
+    let d2 = distance(v_uv, c2);
+
+    // borders
+    let inner_border_1 =
+        smoothstep(inner_border_inner_r, inner_border_inner_r + EDGE_SOFTNESS, d1) *
+        (1.0 - smoothstep(inner_border_outer_r, inner_border_outer_r + EDGE_SOFTNESS, d1));
+
+    let inner_border_2 =
+        smoothstep(inner_border_inner_r, inner_border_inner_r + EDGE_SOFTNESS, d2) *
+        (1.0 - smoothstep(inner_border_outer_r, inner_border_outer_r + EDGE_SOFTNESS, d2));
+
+    // Combine borders additively
+    let inner_border_mask = min(inner_border_1 + inner_border_2, 1.0);
+
+    // outer region
+    let outer_fill_mask =
+        smoothstep(inner_border_outer_r, inner_border_outer_r + EDGE_SOFTNESS, d_outer) *
+        (1.0 - smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d_outer));
+
+    let outer_border_mask =
+        smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d_outer) *
+        (1.0 - smoothstep(r, r + EDGE_SOFTNESS, d_outer));
+
+    // inner circle masks
+    let inner_fill_1 = 1.0 - smoothstep(inner_border_inner_r, inner_border_inner_r + EDGE_SOFTNESS, d1);
+    let inner_fill_2 = 1.0 - smoothstep(inner_border_inner_r, inner_border_inner_r + EDGE_SOFTNESS, d2);
+
+    // Combine fills, but reduce intensity where borders exist
+    let inner_fill_combined = max(inner_fill_1, inner_fill_2);
+    let inner_fill_mask = inner_fill_combined * (1.0 - inner_border_mask);
+
+    // colors
+    let inner_fill_color = vec3<f32>(0.1329, 0.3185, 0.6038);
+    let outer_fill_color = vec3<f32>(0.40724, 0.60383, 1.0);
+    let border_color = vec3<f32>(0.0, 0.0, 0.0);
+
+    // layering
+    var col = border_color;
+    col = mix(col, outer_fill_color, outer_fill_mask);
+    col = mix(col, border_color, inner_border_mask);
+    col = mix(col, inner_fill_color, inner_fill_mask);
+
+    // alpha
+    let alpha = clamp(inner_fill_mask + outer_fill_mask + inner_border_mask + outer_border_mask, 0.0, 1.0);
+
+    return vec4<f32>(col, alpha);
 }
 
 fn draw_intersection_of(v_uv: vec2<f32>)  -> vec4<f32> {
-    return vec4<f32>(0.0); // TODO: implement
+    let r = 0.48;
+    let border_gap = 0.35;
+
+    // outer circle
+    let d_outer = distance(v_uv, vec2<f32>(0.5, 0.5));
+
+    // radius of the inner border
+    let inner_border_outer_r = r - BORDER_THICKNESS * 0.7 - border_gap;
+    let inner_border_inner_r = inner_border_outer_r - BORDER_THICKNESS * 0.7;
+
+    // positions for two overlapping inner circles
+    let offset = 0.05;
+    let c1 = vec2<f32>(0.5 - offset, 0.5);
+    let c2 = vec2<f32>(0.5 + offset, 0.5);
+    let d1 = distance(v_uv, c1);
+    let d2 = distance(v_uv, c2);
+
+    // borders
+    let inner_border_1 =
+        smoothstep(inner_border_inner_r, inner_border_inner_r + EDGE_SOFTNESS, d1) *
+        (1.0 - smoothstep(inner_border_outer_r, inner_border_outer_r + EDGE_SOFTNESS, d1));
+    let inner_border_2 =
+        smoothstep(inner_border_inner_r, inner_border_inner_r + EDGE_SOFTNESS, d2) *
+        (1.0 - smoothstep(inner_border_outer_r, inner_border_outer_r + EDGE_SOFTNESS, d2));
+
+    // Combine borders additively
+    let inner_border_mask = min(inner_border_1 + inner_border_2, 1.0);
+
+    // outer region
+    let outer_fill_mask =
+        smoothstep(inner_border_outer_r, inner_border_outer_r + EDGE_SOFTNESS, d_outer) *
+        (1.0 - smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d_outer));
+    let outer_border_mask =
+        smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d_outer) *
+        (1.0 - smoothstep(r, r + EDGE_SOFTNESS, d_outer));
+
+    // inner circle masks
+    let inner_fill_1 = 1.0 - smoothstep(inner_border_inner_r, inner_border_inner_r + EDGE_SOFTNESS, d1);
+    let inner_fill_2 = 1.0 - smoothstep(inner_border_inner_r, inner_border_inner_r + EDGE_SOFTNESS, d2);
+    
+    // Calculate overlapping region (where both circles are filled)
+    let overlap_mask = min(inner_fill_1, inner_fill_2);
+    
+    // Calculate non-overlapping regions (exclusive OR)
+    let non_overlap_mask = max(inner_fill_1, inner_fill_2) - overlap_mask;
+    
+    // Reduce fill intensity where borders exist
+    let overlap_final = overlap_mask * (1.0 - inner_border_mask);
+    let non_overlap_final = non_overlap_mask * (1.0 - inner_border_mask);
+    
+    // colors
+    let inner_fill_color = vec3<f32>(0.1329, 0.3185, 0.6038);
+    let outer_fill_color = vec3<f32>(0.40724, 0.60383, 1.0);
+    let border_color = vec3<f32>(0.0, 0.0, 0.0);
+    // layering
+    var col = border_color;
+    col = mix(col, outer_fill_color, outer_fill_mask);
+    col = mix(col, border_color, inner_border_mask);
+    col = mix(col, outer_fill_color, non_overlap_final);
+    col = mix(col, inner_fill_color, overlap_final);
+    // alpha
+    let alpha = clamp(overlap_final + non_overlap_final + outer_fill_mask + inner_border_mask + outer_border_mask, 0.0, 1.0);
+    return vec4<f32>(col, alpha);
 }
 
-fn draw_complement(v_uv: vec2<f32>)  -> vec4<f32> {
-    return vec4<f32>(0.0); // TODO: implement
+fn draw_complement(v_uv: vec2<f32>) -> vec4<f32> {
+    let d = distance(v_uv, vec2<f32>(0.5, 0.5));
+    let r = 0.48;
+    let border_gap = 0.35;
+
+    // radius of the inner border
+    let inner_border_outer_r = r - BORDER_THICKNESS - border_gap;
+    let inner_border_inner_r = inner_border_outer_r - BORDER_THICKNESS;
+
+    // masks
+    let inner_fill_mask = 1.0 - smoothstep(inner_border_inner_r, inner_border_inner_r + EDGE_SOFTNESS, d);
+
+    // solid outer fill area between inner and outer borders
+    let outer_fill_mask =
+        smoothstep(inner_border_outer_r, inner_border_outer_r + EDGE_SOFTNESS, d) *
+        (1.0 - smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d));
+
+    // borders
+    let inner_border_mask =
+        smoothstep(inner_border_inner_r, inner_border_inner_r + EDGE_SOFTNESS, d) *
+        (1.0 - smoothstep(inner_border_outer_r, inner_border_outer_r + EDGE_SOFTNESS, d));
+
+    let outer_border_mask =
+        smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d) *
+        (1.0 - smoothstep(r, r + EDGE_SOFTNESS, d));
+
+    // colors
+    let inner_fill_color = vec3<f32>(0.1329, 0.3185, 0.6038);
+    let outer_fill_color = vec3<f32>(0.40724, 0.60383, 1.0);
+    let border_color = vec3<f32>(0.0, 0.0, 0.0);
+
+    // layering
+    var col = mix(BACKGROUND_COLOR, border_color, outer_border_mask);
+    col = mix(col, outer_fill_color, outer_fill_mask);
+    col = mix(col, border_color, inner_border_mask);
+    col = mix(col, inner_fill_color, inner_fill_mask);
+
+    // combined alpha
+    let alpha = clamp(inner_fill_mask + outer_fill_mask + inner_border_mask + outer_border_mask, 0.0, 1.0);
+
+    return vec4<f32>(col, alpha);
 }
 
-fn draw_deprecated_class(v_uv: vec2<f32>)  -> vec4<f32> {
+fn draw_deprecated_class(v_uv: vec2<f32>) -> vec4<f32> {
     let d = distance(v_uv, vec2<f32>(0.5, 0.5));
     let r = 0.48;
     // smooth fill mask (circle inside without border)
@@ -219,17 +380,13 @@ fn draw_deprecated_class(v_uv: vec2<f32>)  -> vec4<f32> {
     var col = mix(BACKGROUND_COLOR, border_color, border_mask);
     col = mix(col, fill_color, fill_mask);
 
-    // blend smoothly: background -> border -> fill
-    col = mix(BACKGROUND_COLOR, border_color, border_mask);
-    col = mix(col, fill_color, fill_mask);
-
     // smooth alpha (fill + border)
     let alpha = clamp(fill_mask + border_mask, 0.0, 1.0);
 
     return vec4<f32>(col, alpha);
 }
 
-fn draw_anonymous_class(v_uv: vec2<f32>)  -> vec4<f32> {
+fn draw_anonymous_class(v_uv: vec2<f32>) -> vec4<f32> {
     let d = distance(v_uv, vec2<f32>(0.5, 0.5));
     let r = 0.48;
     // smooth fill mask (circle inside without border)
@@ -264,7 +421,7 @@ fn draw_anonymous_class(v_uv: vec2<f32>)  -> vec4<f32> {
     return vec4<f32>(col, alpha);
 }
 
-fn draw_literal(v_uv: vec2<f32>)  -> vec4<f32> {
+fn draw_literal(v_uv: vec2<f32>) -> vec4<f32> {
     let rect_center = vec2<f32>(0.5, 0.5);
     let rect_size = vec2(0.9, 0.25);
     let dot_count_rect = 11.0;
@@ -337,7 +494,7 @@ fn draw_literal(v_uv: vec2<f32>)  -> vec4<f32> {
     return vec4<f32>(col, 1.0);
 }
 
-fn draw_rdfs_class(v_uv: vec2<f32>)  -> vec4<f32> {
+fn draw_rdfs_class(v_uv: vec2<f32>) -> vec4<f32> {
     let d = distance(v_uv, vec2<f32>(0.5, 0.5));
     let r = 0.48;
     // smooth fill mask (circle inside without border)
@@ -355,17 +512,13 @@ fn draw_rdfs_class(v_uv: vec2<f32>)  -> vec4<f32> {
     var col = mix(BACKGROUND_COLOR, border_color, border_mask);
     col = mix(col, fill_color, fill_mask);
 
-    // blend smoothly: background -> border -> fill
-    col = mix(BACKGROUND_COLOR, border_color, border_mask);
-    col = mix(col, fill_color, fill_mask);
-
     // smooth alpha (fill + border)
     let alpha = clamp(fill_mask + border_mask, 0.0, 1.0);
 
     return vec4<f32>(col, alpha);
 }
 
-fn draw_rdfs_resource(v_uv: vec2<f32>)  -> vec4<f32> {
+fn draw_rdfs_resource(v_uv: vec2<f32>) -> vec4<f32> {
     let d = distance(v_uv, vec2<f32>(0.5, 0.5));
     let r = 0.48;
     // smooth fill mask (circle inside without border)
@@ -402,44 +555,19 @@ fn draw_rdfs_resource(v_uv: vec2<f32>)  -> vec4<f32> {
 
 fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>) -> vec4<f32> {
     switch node_type {
-        case 0: {
-            return draw_class(v_uv);
-        }
-        case 1: {
-            return draw_subclass(v_uv);
-        }
-        case 2: {
-            return draw_thing(v_uv);
-        }
-        case 3: {
-            return draw_equivalent_class(v_uv);
-        }
-        case 4: {
-            return draw_disjoint_union(v_uv);
-        }
-        case 5: {
-            return draw_intersection_of(v_uv);
-        }
-        case 6: {
-            return draw_complement(v_uv);
-        }
-        case 7: {
-            return draw_deprecated_class(v_uv);
-        }
-        case 8: {
-            return draw_anonymous_class(v_uv);
-        }
-        case 9: {
-            return draw_literal(v_uv);
-        }
-        case 10: {
-            return draw_rdfs_class(v_uv);
-        }
-        case 11: {
-            return draw_rdfs_resource(v_uv);
-        }
-        default: {
-            return vec4(0.0);
-        }
+        case 0: {return draw_class(v_uv);}
+        case 1: {return draw_subclass(v_uv);}
+        case 2: {return draw_thing(v_uv);}
+        case 3: {return draw_equivalent_class(v_uv);}
+        case 4: {return draw_union(v_uv);}
+        case 5: {return draw_union(v_uv);}
+        case 6: {return draw_intersection_of(v_uv);}
+        case 7: {return draw_complement(v_uv);}
+        case 8: {return draw_deprecated_class(v_uv);}
+        case 9: {return draw_anonymous_class(v_uv);}
+        case 10: {return draw_literal(v_uv);}
+        case 11: {return draw_rdfs_class(v_uv);}
+        case 12: {return draw_rdfs_resource(v_uv);}
+        default: {return vec4(0.0);}
     }
 }
