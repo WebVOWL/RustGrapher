@@ -597,11 +597,11 @@ impl State {
             self.simulator.world.maintain();
         }
 
-        let positions_storage = self.simulator.world.read_storage::<Position>();
-        for (i, entity) in self.simulator.entities.iter().enumerate() {
-            if let Some(pos) = positions_storage.get(*entity) {
-                self.positions[i] = [pos.0.x, pos.0.y];
-            }
+        let positions = self.simulator.world.read_storage::<Position>();
+        let entities = self.simulator.world.entities();
+
+        for (i, (_, position)) in (&entities, &positions).join().enumerate() {
+            self.positions[i] = [position.0.x, position.0.y];
         }
         // self.frame_count += 1;
         // let t = ((self.frame_count as f32) * 0.05).sin();
