@@ -7,7 +7,7 @@ use crate::web::{
         components::{
             edges::Connects,
             forces::NodeForces,
-            nodes::{Fixed, Mass, Position, Velocity},
+            nodes::{Dragged, Fixed, Mass, Position, Velocity},
         },
         ressources::{
             event_channels::{
@@ -441,6 +441,30 @@ pub struct Simulator<'a, 'b> {
 impl<'a, 'b> Simulator<'a, 'b> {
     pub fn builder() -> SimulatorBuilder {
         SimulatorBuilder::default()
+    }
+
+    /// Notify simulator that the user started dragging an element.
+    pub fn drag_start(&self, entity_id: u32) {
+        info!("[{0}] Drag start", entity_id);
+        let entity = self.world.entities().entity(entity_id);
+        let updater = self.world.read_resource::<LazyUpdate>();
+        updater.insert(entity, Dragged);
+    }
+
+    /// Notify simulator that the user stopped dragging an element.
+    pub fn drag_end(&self, entity_id: u32) {
+        info!("[{0}] Drag end", entity_id);
+        let entity = self.world.entities().entity(entity_id);
+        let updater = self.world.read_resource::<LazyUpdate>();
+        updater.remove::<Dragged>(entity);
+    }
+
+    /// Update simulator with cursor offset from last position update
+    pub fn dragged(&self, cursor_position: Vec2, entity_id: u32) {
+        info!("[{0}] Dragged position: {1}", entity_id, cursor_position);
+        let entity = self.world.entities().entity(entity_id);
+        let updater = self.world.read_resource::<LazyUpdate>();
+        updater.insert(entity, Position(cursor_position));
     }
 
     // TODO: Implement with signals

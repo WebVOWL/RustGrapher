@@ -9,10 +9,12 @@ use glyphon::{
     SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
 use log::info;
-use specs::WorldExt;
+use specs::{Join, WorldExt};
 use std::sync::Arc;
 use vertex_buffer::{NodeInstance, VERTICES, Vertex};
 use wgpu::util::DeviceExt;
+use winit::dpi::PhysicalPosition;
+use winit::event::{ElementState, MouseButton};
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
 pub struct State {
@@ -34,6 +36,7 @@ pub struct State {
     edge_pipeline: wgpu::RenderPipeline,
     edge_instance_buffer: wgpu::Buffer,
     num_edge_instances: u32,
+
     // Node and edge coordinates in pixels
     positions: Vec<[f32; 2]>,
     labels: Vec<String>,
@@ -42,6 +45,10 @@ pub struct State {
     frame_count: u64, // TODO: Remove after implementing simulator
     simulator: Simulator<'static, 'static>,
     paused: bool,
+
+    // User input
+    cursor_position: Option<PhysicalPosition<f64>>,
+    node_dragged: bool,
 
     // Glyphon resources are initialized lazily when we have a non-zero surface.
     font_system: Option<FontSystem>,
@@ -288,7 +295,7 @@ impl State {
             Vec2::new(positions[1][0], positions[1][1]),
             Vec2::new(positions[2][0], positions[2][1]),
         ];
-        let sim_edges = vec![Vec2::new(0.0, 1.0)];
+        let sim_edges = vec![[0.0 as u32, 1.0 as u32]];
         let mut simulator = Simulator::builder().build(sim_nodes, sim_edges);
 
         // Glyphon: do not create heavy glyphon resources unless we have a non-zero surface.
@@ -329,6 +336,8 @@ impl State {
             frame_count: 0,
             simulator,
             paused: false,
+            cursor_position: None,
+            node_dragged: false,
             font_system,
             swash_cache,
             viewport,
@@ -619,7 +628,7 @@ impl State {
             })
             .collect();
 
-        let mut edge_positions: Vec<[[f32; 2]; 2]> = vec![];
+        let mut edge_positions: Vec<[[f32; 2]; 2]> = Vec::with_capacity(self.edges.len());
         // Update edge endpoints from node positions
         for edge in &mut self.edges {
             edge_positions.push([self.positions[edge[0]], self.positions[edge[1]]]);
@@ -643,6 +652,34 @@ impl State {
                 self.window.request_redraw();
             }
             _ => {}
+        }
+    }
+    pub fn handle_mouse_key(&mut self, button: MouseButton, is_pressed: bool) {
+        match (button, is_pressed) {
+            (MouseButton::Left, true) => {
+                // Begin node dragging on mouse click
+                self.node_dragged = true;
+                self.simulator.drag_start(0);
+            }
+            (MouseButton::Left, false) => {
+                // Stop node dragging on mouse release
+                self.node_dragged = false;
+                self.simulator.drag_end(0);
+            }
+            (MouseButton::Right, false) => {
+                // Radial menu on mouse release
+            }
+            _ => {}
+        }
+    }
+    pub fn handle_cursor(&mut self, position: PhysicalPosition<f64>) {
+        // (x,y) coords in pixels relative to the top-left corner of the window
+        self.cursor_position = Some(position);
+        if self.node_dragged {
+            if let Some(pos) = self.cursor_position {
+                self.simulator
+                    .dragged(Vec2::new(pos.x as f32, pos.y as f32), 0);
+            }
         }
     }
 }
