@@ -25,8 +25,8 @@ use crate::web::simulator::Simulator;
 use crate::web::renderer::node_types::NodeType;
 
 use glyphon::{
-    Attrs, Buffer as GlyphBuffer, Cache, Color, Family, FontSystem, Metrics, Resolution, Shaping,
-    SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
+    Attrs, Buffer as GlyphBuffer, BufferLine, Cache, Color, Family, FontSystem, Metrics,
+    Resolution, Shaping, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
 
 struct State {
@@ -177,14 +177,52 @@ impl State {
         });
 
         // TODO: remove test code after adding simulator
-        let positions = [[50.0, 50.0], [250.0, 250.0], [450.0, 450.0]];
+        let positions = [
+            [50.0, 50.0],
+            [250.0, 50.0],
+            [450.0, 50.0],
+            [250.0, 250.0],
+            [450.0, 450.0],
+            [650.0, 50.0],
+            [850.0, 50.0],
+            [1050.0, 50.0],
+            [1250.0, 50.0],
+            [450.0, 250.0],
+            [650.0, 250.0],
+            [850.0, 250.0],
+            [1050.0, 250.0],
+        ];
         let labels = vec![
             String::from("My class"),
+            String::from("Rdfs class"),
+            String::from("Rdfs resource"),
             String::from("Loooooooong class"),
             String::from("Thing"),
+            String::from("Eq1-Eq2-Eq3"),
+            String::from("Deprecated"),
+            String::new(),
+            String::from("Literal"),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
         ];
 
-        let node_types = [NodeType::Class, NodeType::ExternalClass, NodeType::Thing];
+        let node_types = [
+            NodeType::Class,
+            NodeType::RdfsClass,
+            NodeType::RdfsResource,
+            NodeType::ExternalClass,
+            NodeType::Thing,
+            NodeType::EquivalentClass,
+            NodeType::DeprecatedClass,
+            NodeType::AnonymousClass,
+            NodeType::Literal,
+            NodeType::Complement,
+            NodeType::DisjointUnion,
+            NodeType::Intersection,
+            NodeType::Union,
+        ];
 
         // Combine positions and types into NodeInstance entries
 
@@ -391,13 +429,13 @@ impl State {
 
     // Initialize glyphon resources and create one text buffer per node.
     fn init_glyphon(&mut self) {
+        // TODO: Update handling of text overflow to use left alignment, and ellipses at end of string
         if self.font_system.is_some() {
             return; // already initialized
         }
 
         // Embed font bytes into the binary
         const DEFAULT_FONT_BYTES: &'static [u8] = include_bytes!("../../assets/DejaVuSans.ttf");
-        // log::info!("Font size: {} bytes", DEFAULT_FONT_BYTES.len());
 
         let mut font_system = FontSystem::new_with_fonts(core::iter::once(
             glyphon::fontdb::Source::Binary(Arc::new(DEFAULT_FONT_BYTES.to_vec())),
@@ -417,20 +455,68 @@ impl State {
         );
         let scale = self.window.scale_factor() as f32;
         let mut text_buffers: Vec<GlyphBuffer> = Vec::new();
-        for label in self.labels.clone() {
-            let font_px = 16.0 * scale; // font size in physical pixels
-            let line_px = 28.0 * scale;
+        for (i, label) in self.labels.clone().iter().enumerate() {
+            let font_px = 12.0 * scale; // font size in physical pixels
+            let line_px = 12.0 * scale;
             let mut buf = GlyphBuffer::new(&mut font_system, Metrics::new(font_px, line_px));
             // per-label size (in physical pixels)
             // TODO: update if we implement dynamic node size
-            let label_width = 96.0 * scale;
-            let label_height = 24.0 * scale;
+            let label_width = 90.0 * scale;
+            let label_height = match self.node_types[i] {
+                NodeType::ExternalClass | NodeType::DeprecatedClass | NodeType::EquivalentClass => {
+                    48.0 * scale
+                }
+                _ => 24.0 * scale,
+            };
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
+            buf.set_wrap(&mut font_system, glyphon::Wrap::None);
             // sample label using the NodeType
             let attrs = &Attrs::new().family(Family::SansSerif);
+            let node_type_metrics = Metrics::new(font_px - 3.0, line_px);
+            let mut all_owned_eq_labels: Vec<String> = Vec::new();
+            let spans = match self.node_types[i] {
+                NodeType::EquivalentClass => {
+                    // TODO: Update when handling equivalent classes from ontology
+                    let mut labels: Vec<&str> = label.split('-').collect();
+                    let label1 = labels.get(0).map_or("", |v| *v);
+                    let eq_labels = labels.split_off(1);
+                    let (last_label, eq_labels) = eq_labels.split_last().unwrap();
+
+                    let mut eq_labels_attributes: Vec<(&str, _)> = Vec::new();
+                    for eq_label in eq_labels {
+                        let mut extended_label = eq_label.to_string();
+                        extended_label.push_str(", ");
+                        all_owned_eq_labels.push(extended_label);
+                    }
+                    all_owned_eq_labels.push(last_label.to_string());
+
+                    for extended_label in &all_owned_eq_labels {
+                        eq_labels_attributes.push((extended_label.as_str(), attrs.clone()));
+                    }
+
+                    let mut combined_labels = vec![(label1, attrs.clone()), ("\n", attrs.clone())];
+                    combined_labels.append(&mut eq_labels_attributes);
+
+                    combined_labels
+                }
+                NodeType::ExternalClass => vec![
+                    (label.as_str(), attrs.clone()),
+                    ("\n(external)", attrs.clone().metrics(node_type_metrics)),
+                ],
+                NodeType::DeprecatedClass => vec![
+                    (label.as_str(), attrs.clone()),
+                    ("\n(deprecated)", attrs.clone().metrics(node_type_metrics)),
+                ],
+                NodeType::Thing => vec![("Thing", attrs.clone())],
+                NodeType::Complement => vec![("¬", attrs.clone())],
+                NodeType::DisjointUnion => vec![("1", attrs.clone())],
+                NodeType::Intersection => vec![("∩", attrs.clone())],
+                NodeType::Union => vec![("∪", attrs.clone())],
+                _ => vec![(label.as_str(), attrs.clone())],
+            };
             buf.set_rich_text(
                 &mut font_system,
-                [(label.as_str(), attrs.clone())],
+                spans,
                 &attrs,
                 Shaping::Advanced,
                 Some(glyphon::cosmic_text::Align::Center),
@@ -511,8 +597,12 @@ impl State {
                 // center horizontally on node
                 let left = node_x_px - label_w * 0.5;
 
+                let line_height = 8.0;
                 // top = distance-from-top-in-physical-pixels
-                let top = node_y_px - 16.0;
+                let top = match self.node_types[i] {
+                    NodeType::EquivalentClass => node_y_px - 2.0 * line_height,
+                    _ => node_y_px - line_height,
+                };
 
                 areas.push(TextArea {
                     buffer: buf,
@@ -570,9 +660,9 @@ impl State {
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             // Background color
-                            r: 0.84,
-                            g: 0.87,
-                            b: 0.88,
+                            r: 0.93,
+                            g: 0.94,
+                            b: 0.95,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
