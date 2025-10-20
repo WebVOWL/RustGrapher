@@ -25,8 +25,8 @@ use crate::web::simulator::Simulator;
 use crate::web::renderer::node_types::NodeType;
 
 use glyphon::{
-    Attrs, Buffer as GlyphBuffer, Cache, Color, Family, FontSystem, Metrics, Resolution, Shaping,
-    SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
+    Attrs, Buffer as GlyphBuffer, BufferLine, Cache, Color, Family, FontSystem, Metrics,
+    Resolution, Shaping, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
 
 struct State {
@@ -186,7 +186,7 @@ impl State {
             String::from("Rdfs resource"),
             String::from("Loooooooong class"),
             String::from("Thing"),
-            String::from("Equivalent1-Equivalent2"),
+            String::from("Eq1-Eq2-Eq3"),
             String::from("Deprecated"),
             String::new(),
             String::from("Literal"),
@@ -453,30 +453,40 @@ impl State {
             buf.set_wrap(&mut font_system, glyphon::Wrap::None);
             // sample label using the NodeType
             let attrs = &Attrs::new().family(Family::SansSerif);
+            let node_type_metrics = Metrics::new(font_px - 3.0, line_px);
+            let mut all_owned_eq_labels: Vec<String> = Vec::new();
             let spans = match self.node_types[i] {
                 NodeType::EquivalentClass => {
-                    let labels: Vec<&str> = label.split('-').collect(); // TODO: update when equivalent classes are loaded from ontology
-                    let label1 = labels.get(0).map_or("", |v| v);
-                    let label2 = labels.get(1).map_or("", |v| v);
-                    vec![
-                        (label1, attrs.clone()),
-                        ("\n", attrs.clone()),
-                        (label2, attrs.clone()),
-                    ]
+                    // TODO: Update when handling equivalent classes from ontology
+                    let mut labels: Vec<&str> = label.split('-').collect();
+                    let label1 = labels.get(0).map_or("", |v| *v);
+                    let eq_labels = labels.split_off(1);
+                    let (last_label, eq_labels) = eq_labels.split_last().unwrap();
+
+                    let mut eq_labels_attributes: Vec<(&str, _)> = Vec::new();
+                    for eq_label in eq_labels {
+                        let mut extended_label = eq_label.to_string();
+                        extended_label.push_str(", ");
+                        all_owned_eq_labels.push(extended_label);
+                    }
+                    all_owned_eq_labels.push(last_label.to_string());
+
+                    for extended_label in &all_owned_eq_labels {
+                        eq_labels_attributes.push((extended_label.as_str(), attrs.clone()));
+                    }
+
+                    let mut combined_labels = vec![(label1, attrs.clone()), ("\n", attrs.clone())];
+                    combined_labels.append(&mut eq_labels_attributes);
+
+                    combined_labels
                 }
                 NodeType::ExternalClass => vec![
                     (label.as_str(), attrs.clone()),
-                    (
-                        "\n(external)",
-                        attrs.clone().metrics(Metrics::new(font_px - 3.0, line_px)),
-                    ),
+                    ("\n(external)", attrs.clone().metrics(node_type_metrics)),
                 ],
                 NodeType::DeprecatedClass => vec![
                     (label.as_str(), attrs.clone()),
-                    (
-                        "\n(deprecated)",
-                        attrs.clone().metrics(Metrics::new(font_px - 3.0, line_px)),
-                    ),
+                    ("\n(deprecated)", attrs.clone().metrics(node_type_metrics)),
                 ],
                 NodeType::Thing => vec![("Thing", attrs.clone())],
                 NodeType::Complement => vec![("¬", attrs.clone())],
@@ -568,8 +578,12 @@ impl State {
                 // center horizontally on node
                 let left = node_x_px - label_w * 0.5;
 
+                let line_height = 8.0;
                 // top = distance-from-top-in-physical-pixels
-                let top = node_y_px - 8.0;
+                let top = match self.node_types[i] {
+                    NodeType::EquivalentClass => node_y_px - 2.0 * line_height,
+                    _ => node_y_px - line_height,
+                };
 
                 areas.push(TextArea {
                     buffer: buf,

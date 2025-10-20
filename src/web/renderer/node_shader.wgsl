@@ -84,10 +84,6 @@ fn draw_class(v_uv: vec2<f32>) -> vec4<f32> {
     var col = mix(BACKGROUND_COLOR, border_color, border_mask);
     col = mix(col, fill_color, fill_mask);
 
-    // blend smoothly: background -> border -> fill
-    col = mix(BACKGROUND_COLOR, border_color, border_mask);
-    col = mix(col, fill_color, fill_mask);
-
     // smooth alpha (fill + border)
     let alpha = clamp(fill_mask + border_mask, 0.0, 1.0);
 
@@ -221,8 +217,7 @@ fn draw_union(v_uv: vec2<f32>) -> vec4<f32> {
 
     // outer region
     let outer_fill_mask =
-        smoothstep(inner_border_outer_r, inner_border_outer_r + EDGE_SOFTNESS, d_outer) *
-        (1.0 - smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d_outer));
+        1.0 - smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d_outer);
 
     let outer_border_mask =
         smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d_outer) *
@@ -242,7 +237,7 @@ fn draw_union(v_uv: vec2<f32>) -> vec4<f32> {
     let border_color = vec3<f32>(0.0, 0.0, 0.0);
 
     // layering
-    var col = border_color;
+    var col = mix(BACKGROUND_COLOR, border_color, outer_border_mask);
     col = mix(col, outer_fill_color, outer_fill_mask);
     col = mix(col, border_color, inner_border_mask);
     col = mix(col, inner_fill_color, inner_fill_mask);
@@ -284,8 +279,7 @@ fn draw_intersection_of(v_uv: vec2<f32>)  -> vec4<f32> {
 
     // outer region
     let outer_fill_mask =
-        smoothstep(inner_border_outer_r, inner_border_outer_r + EDGE_SOFTNESS, d_outer) *
-        (1.0 - smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d_outer));
+        1.0 - smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d_outer);
     let outer_border_mask =
         smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d_outer) *
         (1.0 - smoothstep(r, r + EDGE_SOFTNESS, d_outer));
@@ -309,7 +303,7 @@ fn draw_intersection_of(v_uv: vec2<f32>)  -> vec4<f32> {
     let outer_fill_color = vec3<f32>(0.40724, 0.60383, 1.0);
     let border_color = vec3<f32>(0.0, 0.0, 0.0);
     // layering
-    var col = border_color;
+    var col = mix(BACKGROUND_COLOR, border_color, outer_border_mask);
     col = mix(col, outer_fill_color, outer_fill_mask);
     col = mix(col, border_color, inner_border_mask);
     col = mix(col, outer_fill_color, non_overlap_final);
