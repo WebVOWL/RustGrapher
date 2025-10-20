@@ -406,6 +406,7 @@ impl State {
 
     // Initialize glyphon resources and create one text buffer per node.
     fn init_glyphon(&mut self) {
+        // TODO: Update handling of text overflow to use left alignment, and ellipses at end of string
         if self.font_system.is_some() {
             return; // already initialized
         }
