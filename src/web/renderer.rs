@@ -660,9 +660,9 @@ impl State {
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             // Background color
-                            r: 0.84,
-                            g: 0.87,
-                            b: 0.88,
+                            r: 0.93,
+                            g: 0.94,
+                            b: 0.95,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,

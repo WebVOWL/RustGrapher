@@ -50,12 +50,20 @@ fn vs_node_main(
 // parameters
 const BORDER_THICKNESS = 0.03;   // how thick the border ring is
 const EDGE_SOFTNESS    = 0.02;   // anti-aliasing
-const BACKGROUND_COLOR = vec3<f32>(0.84, 0.87, 0.88);
 // polar angle based repeating pattern (dotted border)
 const PI = 3.14159265;
 const DOT_COUNT = 14.0;        // number of dots around the ring
 const DOT_RADIUS = 0.3;        // half-width of each dot in pattern-space (0..0.5)
 const DOT_EDGE = 0.01;         // softness of dot edges
+// colors
+const BACKGROUND_COLOR = vec3<f32>(0.93, 0.94, 0.95);
+const LIGHT_BLUE = vec3<f32>(0.67, 0.8, 1.0);
+const DARK_BLUE = vec3<f32>(0.2, 0.4, 0.8);
+const RDFS_COLOR = vec3<f32>(0.8, 0.6, 0.8);
+const LITERAL_COLOR = vec3<f32>(1.0, 0.8, 0.2);
+const BORDER_COLOR = vec3<f32>(0.0);
+const DEPRECATED_COLOR = vec3<f32>(0.6038);
+const SET_COLOR = vec3<f32>(0.4, 0.6, 0.8);
 
 @fragment
 fn fs_node_main(in: VertOut) -> @location(0) vec4<f32> {
@@ -76,12 +84,10 @@ fn draw_class(v_uv: vec2<f32>) -> vec4<f32> {
     var border_mask = smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d)
                     * (1.0 - smoothstep(r, r + EDGE_SOFTNESS, d));
 
-    let fill_color = vec3<f32>(0.40724, 0.60383, 1.0);
-
-    let border_color = vec3<f32>(0.0, 0.0, 0.0);
+    let fill_color = LIGHT_BLUE;
 
     // blend smoothly: background -> border -> fill
-    var col = mix(BACKGROUND_COLOR, border_color, border_mask);
+    var col = mix(BACKGROUND_COLOR, BORDER_COLOR, border_mask);
     col = mix(col, fill_color, fill_mask);
 
     // smooth alpha (fill + border)
@@ -90,7 +96,7 @@ fn draw_class(v_uv: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(col, alpha);
 }
 
-fn draw_subclass(v_uv: vec2<f32>) -> vec4<f32> {
+fn draw_external_class(v_uv: vec2<f32>) -> vec4<f32> {
     let d = distance(v_uv, vec2<f32>(0.5, 0.5));
     let r = 0.48;
     // smooth fill mask (circle inside without border)
@@ -100,13 +106,11 @@ fn draw_subclass(v_uv: vec2<f32>) -> vec4<f32> {
     var border_mask = smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d)
                     * (1.0 - smoothstep(r, r + EDGE_SOFTNESS, d));
 
-    let fill_color = vec3<f32>(0.03189, 0.13286, 0.60382);
+    let fill_color = DARK_BLUE;
     var col: vec3<f32>;
 
-    let border_color = vec3<f32>(0.0, 0.0, 0.0);
-
     // blend smoothly: background -> border -> fill
-    col = mix(BACKGROUND_COLOR, border_color, border_mask);
+    col = mix(BACKGROUND_COLOR, BORDER_COLOR, border_mask);
     col = mix(col, fill_color, fill_mask);
 
     // smooth alpha (fill + border)
@@ -136,12 +140,10 @@ fn draw_thing(v_uv: vec2<f32>) -> vec4<f32> {
     // apply dot mask to border mask so the ring becomes dotted
     border_mask *= dot_mask;
 
-    let fill_color = vec3<f32>(1.0, 1.0, 1.0);
-
-    let border_color = vec3(0.0, 0.0, 0.0);
+    let fill_color = vec3<f32>(1.0);
 
     // blend smoothly: background -> border -> fill
-    var col = mix(BACKGROUND_COLOR, border_color, border_mask);
+    var col = mix(BACKGROUND_COLOR, BORDER_COLOR, border_mask);
     col = mix(col, fill_color, fill_mask);
 
     // smooth alpha (fill + border)
@@ -170,12 +172,10 @@ fn draw_equivalent_class(v_uv: vec2<f32>) -> vec4<f32> {
     let outer_border_mask = smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d) *
         (1.0 - smoothstep(r, r + EDGE_SOFTNESS, d));
 
-    let fill_color = vec3<f32>(0.40724, 0.60383, 1.0);
+    let fill_color = LIGHT_BLUE;
 
-    let border_color = vec3<f32>(0.0, 0.0, 0.0);
-
-    var col = mix(BACKGROUND_COLOR, border_color, outer_border_mask);
-    col = mix(col, border_color, inner_border_mask);
+    var col = mix(BACKGROUND_COLOR, BORDER_COLOR, outer_border_mask);
+    col = mix(col, BORDER_COLOR, inner_border_mask);
     col = mix(col, fill_color, fill_mask);
 
     // smooth alpha (fill + border)
@@ -232,14 +232,13 @@ fn draw_union(v_uv: vec2<f32>) -> vec4<f32> {
     let inner_fill_mask = inner_fill_combined * (1.0 - inner_border_mask);
 
     // colors
-    let inner_fill_color = vec3<f32>(0.1329, 0.3185, 0.6038);
-    let outer_fill_color = vec3<f32>(0.40724, 0.60383, 1.0);
-    let border_color = vec3<f32>(0.0, 0.0, 0.0);
+    let inner_fill_color = SET_COLOR;
+    let outer_fill_color = LIGHT_BLUE;
 
     // layering
-    var col = mix(BACKGROUND_COLOR, border_color, outer_border_mask);
+    var col = mix(BACKGROUND_COLOR, BORDER_COLOR, outer_border_mask);
     col = mix(col, outer_fill_color, outer_fill_mask);
-    col = mix(col, border_color, inner_border_mask);
+    col = mix(col, BORDER_COLOR, inner_border_mask);
     col = mix(col, inner_fill_color, inner_fill_mask);
 
     // alpha
@@ -299,13 +298,12 @@ fn draw_intersection_of(v_uv: vec2<f32>)  -> vec4<f32> {
     let non_overlap_final = non_overlap_mask * (1.0 - inner_border_mask);
     
     // colors
-    let inner_fill_color = vec3<f32>(0.1329, 0.3185, 0.6038);
-    let outer_fill_color = vec3<f32>(0.40724, 0.60383, 1.0);
-    let border_color = vec3<f32>(0.0, 0.0, 0.0);
+    let inner_fill_color = SET_COLOR;
+    let outer_fill_color = LIGHT_BLUE;
     // layering
-    var col = mix(BACKGROUND_COLOR, border_color, outer_border_mask);
+    var col = mix(BACKGROUND_COLOR, BORDER_COLOR, outer_border_mask);
     col = mix(col, outer_fill_color, outer_fill_mask);
-    col = mix(col, border_color, inner_border_mask);
+    col = mix(col, BORDER_COLOR, inner_border_mask);
     col = mix(col, outer_fill_color, non_overlap_final);
     col = mix(col, inner_fill_color, overlap_final);
     // alpha
@@ -340,14 +338,13 @@ fn draw_complement(v_uv: vec2<f32>) -> vec4<f32> {
         (1.0 - smoothstep(r, r + EDGE_SOFTNESS, d));
 
     // colors
-    let inner_fill_color = vec3<f32>(0.1329, 0.3185, 0.6038);
-    let outer_fill_color = vec3<f32>(0.40724, 0.60383, 1.0);
-    let border_color = vec3<f32>(0.0, 0.0, 0.0);
+    let inner_fill_color = SET_COLOR;
+    let outer_fill_color = LIGHT_BLUE;
 
     // layering
-    var col = mix(BACKGROUND_COLOR, border_color, outer_border_mask);
+    var col = mix(BACKGROUND_COLOR, BORDER_COLOR, outer_border_mask);
     col = mix(col, outer_fill_color, outer_fill_mask);
-    col = mix(col, border_color, inner_border_mask);
+    col = mix(col, BORDER_COLOR, inner_border_mask);
     col = mix(col, inner_fill_color, inner_fill_mask);
 
     // combined alpha
@@ -366,12 +363,10 @@ fn draw_deprecated_class(v_uv: vec2<f32>) -> vec4<f32> {
     var border_mask = smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d)
                     * (1.0 - smoothstep(r, r + EDGE_SOFTNESS, d));
 
-    let fill_color = vec3<f32>(0.6038);
-
-    let border_color = vec3<f32>(0.0, 0.0, 0.0);
+    let fill_color = DEPRECATED_COLOR;
 
     // blend smoothly: background -> border -> fill
-    var col = mix(BACKGROUND_COLOR, border_color, border_mask);
+    var col = mix(BACKGROUND_COLOR, BORDER_COLOR, border_mask);
     col = mix(col, fill_color, fill_mask);
 
     // smooth alpha (fill + border)
@@ -401,12 +396,10 @@ fn draw_anonymous_class(v_uv: vec2<f32>) -> vec4<f32> {
     // apply dot mask to border mask so the ring becomes dotted
     border_mask *= dot_mask;
 
-    let fill_color = vec3<f32>(0.40724, 0.60383, 1.0);
-
-    let border_color = vec3(0.0, 0.0, 0.0);
+    let fill_color = LIGHT_BLUE;
 
     // blend smoothly: background -> border -> fill
-    var col = mix(BACKGROUND_COLOR, border_color, border_mask);
+    var col = mix(BACKGROUND_COLOR, BORDER_COLOR, border_mask);
     col = mix(col, fill_color, fill_mask);
 
     // smooth alpha (fill + border)
@@ -420,8 +413,7 @@ fn draw_literal(v_uv: vec2<f32>) -> vec4<f32> {
     let rect_size = vec2(0.9, 0.25);
     let dot_count_rect = 11.0;
     let dot_radius_rect = 0.3;
-    let fill_color = vec3<f32>(1.0, 0.6038, 0.0331);
-    let border_color = vec3<f32>(0.0);
+    let fill_color = LITERAL_COLOR;
     let border_thickness_rect = 0.02;
 
     let p = v_uv - rect_center;
@@ -482,7 +474,7 @@ fn draw_literal(v_uv: vec2<f32>) -> vec4<f32> {
 
     // composite
     var col = BACKGROUND_COLOR;
-    col = mix(col, border_color, border_mask);
+    col = mix(col, BORDER_COLOR, border_mask);
     col = mix(col, fill_color, fill_mask);
 
     return vec4<f32>(col, 1.0);
@@ -498,12 +490,10 @@ fn draw_rdfs_class(v_uv: vec2<f32>) -> vec4<f32> {
     var border_mask = smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d)
                     * (1.0 - smoothstep(r, r + EDGE_SOFTNESS, d));
 
-    let fill_color = vec3<f32>(0.604, 0.3185, 0.604);
-
-    let border_color = vec3<f32>(0.0, 0.0, 0.0);
+    let fill_color = RDFS_COLOR;
 
     // blend smoothly: background -> border -> fill
-    var col = mix(BACKGROUND_COLOR, border_color, border_mask);
+    var col = mix(BACKGROUND_COLOR, BORDER_COLOR, border_mask);
     col = mix(col, fill_color, fill_mask);
 
     // smooth alpha (fill + border)
@@ -533,12 +523,10 @@ fn draw_rdfs_resource(v_uv: vec2<f32>) -> vec4<f32> {
     // apply dot mask to border mask so the ring becomes dotted
     border_mask *= dot_mask;
 
-    let fill_color = vec3<f32>(0.604, 0.3185, 0.604);
-
-    let border_color = vec3(0.0, 0.0, 0.0);
+    let fill_color = RDFS_COLOR;
 
     // blend smoothly: background -> border -> fill
-    var col = mix(BACKGROUND_COLOR, border_color, border_mask);
+    var col = mix(BACKGROUND_COLOR, BORDER_COLOR, border_mask);
     col = mix(col, fill_color, fill_mask);
 
     // smooth alpha (fill + border)
@@ -550,7 +538,7 @@ fn draw_rdfs_resource(v_uv: vec2<f32>) -> vec4<f32> {
 fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>) -> vec4<f32> {
     switch node_type {
         case 0: {return draw_class(v_uv);}
-        case 1: {return draw_subclass(v_uv);}
+        case 1: {return draw_external_class(v_uv);}
         case 2: {return draw_thing(v_uv);}
         case 3: {return draw_equivalent_class(v_uv);}
         case 4: {return draw_union(v_uv);}
@@ -562,6 +550,6 @@ fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>) -> vec4<f32> {
         case 10: {return draw_literal(v_uv);}
         case 11: {return draw_rdfs_class(v_uv);}
         case 12: {return draw_rdfs_resource(v_uv);}
-        default: {return vec4(0.0);}
+        default: {return draw_class(v_uv);}
     }
 }
