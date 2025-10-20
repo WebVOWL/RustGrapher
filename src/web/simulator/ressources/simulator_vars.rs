@@ -34,3 +34,18 @@ pub struct QuadTreeTheta(pub f32);
 /// Freeze nodes when their velocity falls below this number.
 #[derive(Default)]
 pub struct FreezeThreshold(pub f32);
+
+/// Simulation world size.
+pub struct WorldSize {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Default for WorldSize {
+    fn default() -> Self {
+        Self {
+            width: 1280,
+            height: 720,
+        }
+    }
+}

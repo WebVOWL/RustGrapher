@@ -1,7 +1,5 @@
 pub mod components;
-mod ressources;
-
-use std::{collections::HashMap, ops::Deref};
+pub mod ressources;
 
 use crate::web::{
     quadtree::{BoundingBox2D, QuadTree},
@@ -12,13 +10,10 @@ use crate::web::{
             nodes::{Dragged, Fixed, Mass, Position, Velocity},
         },
         ressources::{
-            event_channels::{
-                DampingChan, DeltaTimeChan, FreezeThresholdChan, GravityForceChan,
-                QuadTreeThetaChan, RepelForceChan, SpringNeutralChan, SpringStiffnessChan,
-            },
+            events::SimulatorEvent,
             simulator_vars::{
                 Damping, DeltaTime, FreezeThreshold, GravityForce, QuadTreeTheta, RepelForce,
-                SpringNeutralLength, SpringStiffness,
+                SpringNeutralLength, SpringStiffness, WorldSize,
             },
         },
     },
@@ -26,36 +21,23 @@ use crate::web::{
 use glam::Vec2;
 use log::{debug, info};
 use rayon::prelude::*;
+use specs::prelude::*;
+use specs::shrev::EventChannel;
 use specs::{
     Builder, Dispatcher, DispatcherBuilder, Entities, Join, LazyUpdate, ParJoin, Read, ReadExpect,
     ReadStorage, ReaderId, System, World, WorldExt, Write, WriteStorage,
 };
-use specs::{prelude::*, world::LazyBuilder};
-use web_sys::Event;
-use winit::dpi::{PhysicalPosition, PhysicalSize};
+use std::collections::HashMap;
+use winit::dpi::PhysicalSize;
 
 #[derive(Default)]
 struct EventManager {
-    repel_force_reader: Option<ReaderId<f32>>,
-    spring_stiffness_reader: Option<ReaderId<f32>>,
-    spring_neutral_reader: Option<ReaderId<f32>>,
-    gravity_force_reader: Option<ReaderId<f32>>,
-    deltatime_reader: Option<ReaderId<f32>>,
-    damping_reader: Option<ReaderId<f32>>,
-    quadtree_theta_reader: Option<ReaderId<f32>>,
-    freeze_threshold_reader: Option<ReaderId<f32>>,
+    pub reader: Option<ReaderId<SimulatorEvent>>,
 }
 
 impl<'a> System<'a> for EventManager {
     type SystemData = (
-        Read<'a, RepelForceChan>,
-        Read<'a, SpringStiffnessChan>,
-        Read<'a, SpringNeutralChan>,
-        Read<'a, GravityForceChan>,
-        Read<'a, DeltaTimeChan>,
-        Read<'a, DampingChan>,
-        Read<'a, QuadTreeThetaChan>,
-        Read<'a, FreezeThresholdChan>,
+        Read<'a, EventChannel<SimulatorEvent>>,
         Write<'a, RepelForce>,
         Write<'a, SpringStiffness>,
         Write<'a, SpringNeutralLength>,
@@ -64,19 +46,13 @@ impl<'a> System<'a> for EventManager {
         Write<'a, Damping>,
         Write<'a, QuadTreeTheta>,
         Write<'a, FreezeThreshold>,
+        Write<'a, WorldSize>,
     );
 
     fn run(
         &mut self,
         (
-            repel_events,
-            spring_stiffness_events,
-            spring_neutral_events,
-            gravity_events,
-            deltatime_events,
-            damping_events,
-            quadtree_theta_events,
-            freeze_threshold_events,
+            events,
             mut repel_force,
             mut spring_stiffness,
             mut spring_length,
@@ -85,80 +61,35 @@ impl<'a> System<'a> for EventManager {
             mut damping,
             mut quadtree_theta,
             mut freeze_threshold,
+            mut world_size,
         ): Self::SystemData,
     ) {
-        if let Some(val) = repel_events
-            .0
-            .read(&mut self.repel_force_reader.as_mut().unwrap())
-            .last()
-        {
-            repel_force.0 = *val;
-        }
-        if let Some(val) = spring_stiffness_events
-            .0
-            .read(&mut self.spring_stiffness_reader.as_mut().unwrap())
-            .last()
-        {
-            spring_stiffness.0 = *val;
-        }
-        if let Some(val) = spring_neutral_events
-            .0
-            .read(&mut self.spring_neutral_reader.as_mut().unwrap())
-            .last()
-        {
-            spring_length.0 = *val;
-        }
-        if let Some(val) = gravity_events
-            .0
-            .read(&mut self.gravity_force_reader.as_mut().unwrap())
-            .last()
-        {
-            gravity_force.0 = *val;
-        }
-        if let Some(val) = deltatime_events
-            .0
-            .read(&mut self.deltatime_reader.as_mut().unwrap())
-            .last()
-        {
-            deltatime.0 = *val;
-        }
-        if let Some(val) = damping_events
-            .0
-            .read(&mut self.damping_reader.as_mut().unwrap())
-            .last()
-        {
-            damping.0 = *val;
-        }
-        if let Some(val) = quadtree_theta_events
-            .0
-            .read(&mut self.quadtree_theta_reader.as_mut().unwrap())
-            .last()
-        {
-            quadtree_theta.0 = *val;
-        }
-        if let Some(val) = freeze_threshold_events
-            .0
-            .read(&mut self.freeze_threshold_reader.as_mut().unwrap())
-            .last()
-        {
-            freeze_threshold.0 = *val;
+        for event in events.read(&mut self.reader.as_mut().unwrap()) {
+            match event {
+                SimulatorEvent::RepelForceUpdated(value) => repel_force.0 = *value,
+                SimulatorEvent::SpringStiffnessUpdated(value) => spring_stiffness.0 = *value,
+                SimulatorEvent::SpringNeutralLengthUpdated(value) => spring_length.0 = *value,
+                SimulatorEvent::GravityForceUpdated(value) => gravity_force.0 = *value,
+                SimulatorEvent::DeltaTimeUpdated(value) => deltatime.0 = *value,
+                SimulatorEvent::DampingUpdated(value) => damping.0 = *value,
+                SimulatorEvent::SimulationAccuracyUpdated(value) => quadtree_theta.0 = *value,
+                SimulatorEvent::FreezeThresholdUpdated(value) => freeze_threshold.0 = *value,
+                SimulatorEvent::WindowResized { width, height } => {
+                    info!("New world size: w={0}, h={1}", *width, *height);
+                    world_size.width = *width;
+                    world_size.height = *height
+                }
+            }
         }
     }
 
     fn setup(&mut self, world: &mut World) {
         Self::SystemData::setup(world);
-        self.repel_force_reader = Some(world.fetch_mut::<RepelForceChan>().0.register_reader());
-        self.spring_stiffness_reader =
-            Some(world.fetch_mut::<SpringStiffnessChan>().0.register_reader());
-        self.spring_neutral_reader =
-            Some(world.fetch_mut::<SpringNeutralChan>().0.register_reader());
-        self.gravity_force_reader = Some(world.fetch_mut::<GravityForceChan>().0.register_reader());
-        self.deltatime_reader = Some(world.fetch_mut::<DeltaTimeChan>().0.register_reader());
-        self.damping_reader = Some(world.fetch_mut::<DampingChan>().0.register_reader());
-        self.quadtree_theta_reader =
-            Some(world.fetch_mut::<QuadTreeThetaChan>().0.register_reader());
-        self.freeze_threshold_reader =
-            Some(world.fetch_mut::<FreezeThresholdChan>().0.register_reader());
+        self.reader = Some(
+            world
+                .fetch_mut::<EventChannel<SimulatorEvent>>()
+                .register_reader(),
+        );
     }
 }
 
@@ -289,6 +220,7 @@ impl<'a> System<'a> for CalculateGravityForce {
         ReadStorage<'a, Position>,
         ReadStorage<'a, Mass>,
         ReadStorage<'a, Fixed>,
+        ReadStorage<'a, Dragged>,
         WriteStorage<'a, NodeForces>,
         Read<'a, GravityForce>,
     );
@@ -680,6 +612,7 @@ impl SimulatorBuilder {
         world.insert(QuadTreeTheta(self.quadtree_theta));
         world.insert(FreezeThreshold(self.freeze_thresh));
         world.insert(QuadTree::default());
+        world.insert(WorldSize::default());
     }
 
     fn create_entities(world: &mut World, nodes: Vec<Vec2>, edges: Vec<[u32; 2]>) {

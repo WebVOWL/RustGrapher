@@ -1,14 +1,18 @@
 mod node_types;
 mod vertex_buffer;
 
-use crate::web::renderer::node_types::NodeType;
-use crate::web::simulator::{Simulator, components::nodes::Position};
+use crate::web::{
+    quadtree::{BoundingBox2D, QuadTree},
+    renderer::node_types::NodeType,
+    simulator::{Simulator, components::nodes::Position, ressources::events::SimulatorEvent},
+};
 use glam::Vec2;
 use glyphon::{
     Attrs, Buffer as GlyphBuffer, Cache, Color, Family, FontSystem, Metrics, Resolution, Shaping,
     SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
 use log::info;
+use specs::shrev::EventChannel;
 use specs::{Join, WorldExt};
 use std::sync::Arc;
 use vertex_buffer::{NodeInstance, VERTICES, Vertex};
@@ -430,6 +434,17 @@ impl State {
 
     pub fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
+            {
+                let mut sim_channel = self
+                    .simulator
+                    .world
+                    .fetch_mut::<EventChannel<SimulatorEvent>>();
+                sim_channel.single_write(SimulatorEvent::WindowResized {
+                    width: width,
+                    height: height,
+                });
+            }
+
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
