@@ -18,7 +18,7 @@ use std::sync::Arc;
 use vertex_buffer::{NodeInstance, VERTICES, Vertex};
 use wgpu::util::DeviceExt;
 use winit::dpi::PhysicalPosition;
-use winit::event::{ElementState, MouseButton};
+use winit::event::MouseButton;
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
 pub struct State {

@@ -19,7 +19,7 @@ use crate::web::{
     },
 };
 use glam::Vec2;
-use log::{debug, info};
+use log::info;
 use rayon::prelude::*;
 use specs::prelude::*;
 use specs::shrev::EventChannel;
