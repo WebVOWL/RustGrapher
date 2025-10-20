@@ -191,6 +191,8 @@ impl State {
             [650.0, 250.0],
             [850.0, 250.0],
             [1050.0, 250.0],
+            [50.0, 500.0],
+            [1250.0, 250.0],
         ];
         let labels = vec![
             String::from("My class"),
@@ -206,6 +208,8 @@ impl State {
             String::new(),
             String::new(),
             String::new(),
+            String::from("Property"),
+            String::from("Datatype"),
         ];
 
         let node_types = [
@@ -222,6 +226,8 @@ impl State {
             NodeType::DisjointUnion,
             NodeType::Intersection,
             NodeType::Union,
+            NodeType::Literal,
+            NodeType::Datatype,
         ];
 
         // Combine positions and types into NodeInstance entries
@@ -304,9 +310,9 @@ impl State {
 
         // TODO: remove test edges after adding simulator
         let edges = [[0, 1]];
-        let mut edge_positions: Vec<[[f32; 2]; 2]> = vec![];
+        let mut edge_positions: Vec<[[f32; 2]; 3]> = vec![];
         for edge in edges {
-            edge_positions.push([positions[edge[0]], positions[edge[1]]]);
+            edge_positions.push([positions[edge[0]], positions[edge[1]], [50.0, 500.0]]);
         }
         let edge_instance_buffer =
             vertex_buffer::create_edge_instance_buffer(&device, &edge_positions);

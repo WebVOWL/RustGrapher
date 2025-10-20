@@ -95,12 +95,13 @@ pub fn create_node_instance_buffer(
 pub struct EdgeInstance {
     pub start: [f32; 2],
     pub end: [f32; 2],
+    pub center: [f32; 2],
 }
 
 impl EdgeInstance {
-    // locations 1 and 2: start, end
-    const ATTRIBS: [wgpu::VertexAttribute; 2] =
-        wgpu::vertex_attr_array![1 => Float32x2, 2 => Float32x2];
+    // locations 1, 2 and 3: start, end, and center for curved lines
+    const ATTRIBS: [wgpu::VertexAttribute; 3] =
+        wgpu::vertex_attr_array![1 => Float32x2, 2 => Float32x2, 3 => Float32x2];
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         use std::mem;
@@ -112,7 +113,7 @@ impl EdgeInstance {
     }
 }
 
-pub fn create_edge_instance_buffer(device: &wgpu::Device, edges: &[[[f32; 2]; 2]]) -> wgpu::Buffer {
+pub fn create_edge_instance_buffer(device: &wgpu::Device, edges: &[[[f32; 2]; 3]]) -> wgpu::Buffer {
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("edge_instance_buffer"),
         contents: bytemuck::cast_slice(edges),

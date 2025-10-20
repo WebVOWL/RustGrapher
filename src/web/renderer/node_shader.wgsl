@@ -317,8 +317,8 @@ fn draw_complement(v_uv: vec2<f32>) -> vec4<f32> {
     let border_gap = 0.35;
 
     // radius of the inner border
-    let inner_border_outer_r = r - BORDER_THICKNESS - border_gap;
-    let inner_border_inner_r = inner_border_outer_r - BORDER_THICKNESS;
+    let inner_border_outer_r = r - BORDER_THICKNESS * 0.8 - border_gap;
+    let inner_border_inner_r = inner_border_outer_r - BORDER_THICKNESS * 0.8;
 
     // masks
     let inner_fill_mask = 1.0 - smoothstep(inner_border_inner_r, inner_border_inner_r + EDGE_SOFTNESS, d);
@@ -477,7 +477,9 @@ fn draw_literal(v_uv: vec2<f32>) -> vec4<f32> {
     col = mix(col, BORDER_COLOR, border_mask);
     col = mix(col, fill_color, fill_mask);
 
-    return vec4<f32>(col, 1.0);
+    let alpha = clamp(fill_mask + border_mask, 0.0, 1.0);
+
+    return vec4<f32>(col, alpha);
 }
 
 fn draw_rdfs_class(v_uv: vec2<f32>) -> vec4<f32> {
@@ -535,6 +537,48 @@ fn draw_rdfs_resource(v_uv: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(col, alpha);
 }
 
+fn draw_datatype(v_uv: vec2<f32>) -> vec4<f32> {
+    let rect_center = vec2<f32>(0.5, 0.5);
+    let rect_size = vec2(0.9, 0.25);
+    let fill_color = LITERAL_COLOR;
+    let border_thickness_rect = 0.02;
+
+    let p = v_uv - rect_center;
+
+    let half_size = 0.5 * rect_size;
+
+    let inside_x = abs(p.x) <= half_size.x;
+    let inside_y = abs(p.y) <= half_size.y;
+
+    let inside_rect = inside_x && inside_y;
+
+    let inside_inner = abs(p.x) <= half_size.x - border_thickness_rect && abs(p.y) <= half_size.y - border_thickness_rect;
+
+    // mask selection
+    var fill_mask = 0.0;
+    if(inside_inner) {
+        fill_mask = 1.0;
+    }
+    var border_mask = 0.0;
+    if(inside_rect && !inside_inner) {
+        border_mask = 1.0;
+    }
+
+    // perimeter coordinate
+    let width = 2.0 * half_size.x;
+    let height = 2.0 * half_size.y;
+    let perim = 2.0 * (width + height);
+
+    // composite
+    var col = BACKGROUND_COLOR;
+    col = mix(col, BORDER_COLOR, border_mask);
+    col = mix(col, fill_color, fill_mask);
+
+    let alpha = clamp(fill_mask + border_mask, 0.0, 1.0);
+
+    return vec4<f32>(col, alpha);
+}
+
 fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>) -> vec4<f32> {
     switch node_type {
         case 0: {return draw_class(v_uv);}
@@ -550,6 +594,7 @@ fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>) -> vec4<f32> {
         case 10: {return draw_literal(v_uv);}
         case 11: {return draw_rdfs_class(v_uv);}
         case 12: {return draw_rdfs_resource(v_uv);}
+        case 13: {return draw_datatype(v_uv);}
         default: {return draw_class(v_uv);}
     }
 }
