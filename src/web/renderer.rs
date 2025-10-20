@@ -160,7 +160,7 @@ impl State {
         });
 
         // TODO: remove test code after adding simulator
-        let positions = [[50.0, 25.0], [250.0, 50.0], [50.0, 450.0]];
+        let positions = [[0.0, 0.0], [250.0, 50.0], [50.0, 450.0]];
         let labels = vec![
             String::from("My class"),
             String::from("Loooooooong class"),
@@ -677,8 +677,11 @@ impl State {
         self.cursor_position = Some(position);
         if self.node_dragged {
             if let Some(pos) = self.cursor_position {
-                self.simulator
-                    .dragged(Vec2::new(pos.x as f32, pos.y as f32), 0);
+                self.simulator.dragged(
+                    Vec2::new(pos.x as f32, pos.y as f32),
+                    self.window.inner_size(),
+                    0,
+                );
             }
         }
     }

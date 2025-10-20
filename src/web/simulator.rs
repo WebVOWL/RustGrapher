@@ -24,7 +24,7 @@ use crate::web::{
     },
 };
 use glam::Vec2;
-use log::info;
+use log::{debug, info};
 use rayon::prelude::*;
 use specs::{
     Builder, Dispatcher, DispatcherBuilder, Entities, Join, LazyUpdate, ParJoin, Read, ReadExpect,
@@ -32,6 +32,7 @@ use specs::{
 };
 use specs::{prelude::*, world::LazyBuilder};
 use web_sys::Event;
+use winit::dpi::{PhysicalPosition, PhysicalSize};
 
 #[derive(Default)]
 struct EventManager {
@@ -471,7 +472,7 @@ impl<'a, 'b> Simulator<'a, 'b> {
 
     /// Notify simulator that the user started dragging an element.
     pub fn drag_start(&self, entity_id: u32) {
-        info!("[{0}] Drag start", entity_id);
+        debug!("[{0}] Drag start", entity_id);
         let entity = self.world.entities().entity(entity_id);
         let updater = self.world.read_resource::<LazyUpdate>();
         updater.insert(entity, Dragged);
@@ -479,18 +480,27 @@ impl<'a, 'b> Simulator<'a, 'b> {
 
     /// Notify simulator that the user stopped dragging an element.
     pub fn drag_end(&self, entity_id: u32) {
-        info!("[{0}] Drag end", entity_id);
+        debug!("[{0}] Drag end", entity_id);
         let entity = self.world.entities().entity(entity_id);
         let updater = self.world.read_resource::<LazyUpdate>();
         updater.remove::<Dragged>(entity);
     }
 
-    /// Update simulator with cursor offset from last position update
-    pub fn dragged(&self, cursor_position: Vec2, entity_id: u32) {
-        info!("[{0}] Dragged position: {1}", entity_id, cursor_position);
-        let entity = self.world.entities().entity(entity_id);
+    /// Update simulator with cursor offset from last position update.
+    pub fn dragged(&self, cursor_position: Vec2, window_size: PhysicalSize<u32>, entity_id: u32) {
+        let normalized_width = cursor_position.x.clamp(0.0, window_size.width as f32);
+        let normalized_height = ((cursor_position.y * -1.0) + window_size.height as f32)
+            .clamp(0.0, window_size.height as f32);
+
+        debug!("[{0}] Dragged position: {1}", entity_id, cursor_position);
+        debug!("[{0}] Computed position: {1}", entity_id, cursor_position);
+
         let updater = self.world.read_resource::<LazyUpdate>();
-        updater.insert(entity, Position(cursor_position));
+        let entity = self.world.entities().entity(entity_id);
+        updater.insert(
+            entity,
+            Position(Vec2::new(normalized_width, normalized_height)),
+        );
     }
 
     // TODO: Implement with signals
