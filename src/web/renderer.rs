@@ -50,6 +50,7 @@ struct State {
     num_edge_instances: u32,
     // Node and edge coordinates in pixels
     positions: Vec<[f32; 2]>,
+    labels: Vec<String>,
     edges: Vec<[usize; 2]>,
     node_types: Vec<NodeType>,
     frame_count: u64, // TODO: Remove after implementing simulator
@@ -177,6 +178,11 @@ impl State {
 
         // TODO: remove test code after adding simulator
         let positions = [[50.0, 50.0], [250.0, 250.0], [450.0, 450.0]];
+        let labels = vec![
+            String::from("My class"),
+            String::from("Loooooooong class"),
+            String::from("Thing"),
+        ];
 
         let node_types = [NodeType::Class, NodeType::ExternalClass, NodeType::Thing];
 
@@ -352,6 +358,7 @@ impl State {
             edge_instance_buffer,
             num_edge_instances,
             positions: positions.to_vec(),
+            labels,
             edges: edges.to_vec(),
             node_types: node_types.to_vec(),
             frame_count: 0,
@@ -390,7 +397,7 @@ impl State {
 
         // Embed font bytes into the binary
         const DEFAULT_FONT_BYTES: &'static [u8] = include_bytes!("../../assets/DejaVuSans.ttf");
-        log::info!("Font size: {} bytes", DEFAULT_FONT_BYTES.len());
+        // log::info!("Font size: {} bytes", DEFAULT_FONT_BYTES.len());
 
         let mut font_system = FontSystem::new_with_fonts(core::iter::once(
             glyphon::fontdb::Source::Binary(Arc::new(DEFAULT_FONT_BYTES.to_vec())),
@@ -410,26 +417,23 @@ impl State {
         );
         let scale = self.window.scale_factor() as f32;
         let mut text_buffers: Vec<GlyphBuffer> = Vec::new();
-        for ty in self.node_types.iter() {
-            let font_px = 12.0 * scale; // font size in physical pixels
+        for label in self.labels.clone() {
+            let font_px = 16.0 * scale; // font size in physical pixels
             let line_px = 28.0 * scale;
             let mut buf = GlyphBuffer::new(&mut font_system, Metrics::new(font_px, line_px));
             // per-label size (in physical pixels)
             // TODO: update if we implement dynamic node size
             let label_width = 96.0 * scale;
-            let label_height = 96.0 * scale;
+            let label_height = 24.0 * scale;
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
             // sample label using the NodeType
-            let label = match ty {
-                NodeType::Class => "Class",
-                NodeType::ExternalClass => "External",
-                NodeType::Thing => "Thing",
-            };
-            buf.set_text(
+            let attrs = &Attrs::new().family(Family::SansSerif);
+            buf.set_rich_text(
                 &mut font_system,
-                &label,
-                &Attrs::new().family(Family::SansSerif),
+                [(label.as_str(), attrs.clone())],
+                &attrs,
                 Shaping::Advanced,
+                Some(glyphon::cosmic_text::Align::Center),
             );
             buf.shape_until_scroll(&mut font_system, false);
             text_buffers.push(buf);
@@ -501,14 +505,14 @@ impl State {
                 let node_y_px = vp_h_px - node_logical[1] * scale;
 
                 let (label_w_opt, label_h_opt) = buf.size();
-                let label_w = label_w_opt.unwrap_or(100.0) as f32;
+                let label_w = label_w_opt.unwrap_or(96.0) as f32;
                 let label_h = label_h_opt.unwrap_or(24.0) as f32;
 
                 // center horizontally on node
                 let left = node_x_px - label_w * 0.5;
 
                 // top = distance-from-top-in-physical-pixels
-                let top = node_y_px - label_h * 0.5;
+                let top = node_y_px - 16.0;
 
                 areas.push(TextArea {
                     buffer: buf,
@@ -618,10 +622,10 @@ impl State {
 
     fn update(&mut self) {
         self.frame_count += 1;
-        let t = ((self.frame_count as f32) * 0.05).sin() * 20.0;
+        let t = ((self.frame_count as f32) * 0.05).sin();
 
         // Update node positions
-        self.positions[1] = [100.0, 100.0 + t];
+        self.positions[1] = [self.positions[1][0], self.positions[1][1] + t];
 
         let nodes: Vec<NodeInstance> = self
             .positions
