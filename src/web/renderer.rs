@@ -3,8 +3,8 @@ mod vertex_buffer;
 
 use glam::Vec2;
 use log::info;
-use std::{cmp::max, cmp::min, sync::Arc};
-use wgpu::util::DeviceExt;
+use std::{cmp::min, sync::Arc};
+use wgpu::{Face, util::DeviceExt};
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::EventLoopExtWebSys;
 use winit::{
@@ -68,15 +68,26 @@ struct State {
 
 impl State {
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
+        // Check if we can use WebGPU (as if this writing it's only enabled in some browsers)
+        let is_webgpu_enabled = wgpu::util::is_browser_webgpu_supported().await;
+
+        // Pick appropriate render backends
+        // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
+        let backends = if is_webgpu_enabled {
+            wgpu::Backends::BROWSER_WEBGPU
+        } else if cfg!(target_arch = "wasm32") {
+            wgpu::Backends::GL
+        } else {
+            wgpu::Backends::PRIMARY
+        };
+
         info!("Building render state");
 
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
-        // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            #[cfg(target_arch = "wasm32")]
-            backends: wgpu::Backends::GL,
+            backends: backends,
             ..Default::default()
         });
 
@@ -95,8 +106,9 @@ impl State {
                 label: None,
                 required_features: wgpu::Features::empty(),
                 // WebGL doesn't support all of wgpu's features, so if
-                // we're building for the web we'll have to disable some.
-                required_limits: if cfg!(target_arch = "wasm32") {
+                // we're building for a browser not supporting WebGPU,
+                // we'll have to disable some.
+                required_limits: if cfg!(target_arch = "wasm32") && !is_webgpu_enabled {
                     wgpu::Limits::downlevel_webgl2_defaults()
                 } else {
                     wgpu::Limits::default()
@@ -241,7 +253,7 @@ impl State {
             });
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
+            label: Some("Node Pipeline"),
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -302,6 +314,7 @@ impl State {
 
         let edge_shader =
             device.create_shader_module(wgpu::include_wgsl!("./renderer/edge_shader.wgsl"));
+
         let edge_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Edge Pipeline"),
             layout: Some(&render_pipeline_layout),
@@ -323,12 +336,22 @@ impl State {
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
-                front_face: wgpu::FrontFace::Cw,
-                cull_mode: None,
-                ..Default::default()
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
+                polygon_mode: wgpu::PolygonMode::Fill,
+                // Requires Features::DEPTH_CLIP_CONTROL
+                unclipped_depth: false,
+                // Requires Features::CONSERVATIVE_RASTERIZATION
+                conservative: false,
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
             multiview: None,
             cache: None,
         });
@@ -423,12 +446,7 @@ impl State {
         let cache = Cache::new(&self.device);
         let viewport = Viewport::new(&self.device, &cache);
 
-        let mut atlas = TextAtlas::new(
-            &self.device,
-            &self.queue,
-            &cache,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
-        );
+        let mut atlas = TextAtlas::new(&self.device, &self.queue, &cache, self.config.format);
         let text_renderer = TextRenderer::new(
             &mut atlas,
             &self.device,
