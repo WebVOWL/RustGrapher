@@ -212,6 +212,8 @@ impl<'a> System<'a> for CalculateNodeForce {
     }
 }
 
+/// Computes center gravity of the world.
+/// All elements will gravitate towards this point.
 struct CalculateGravityForce;
 
 impl<'a> System<'a> for CalculateGravityForce {
@@ -223,17 +225,28 @@ impl<'a> System<'a> for CalculateGravityForce {
         ReadStorage<'a, Dragged>,
         WriteStorage<'a, NodeForces>,
         Read<'a, GravityForce>,
+        Read<'a, WorldSize>,
     );
-
-    // compute_center_gravity()
     fn run(
         &mut self,
-        (entities, positions, masses, fixed, mut forces, gravity_force): Self::SystemData,
+        (entities, positions, masses, fixed, dragged, mut forces, gravity_force, world_size): Self::SystemData,
     ) {
-        (&entities, &positions, &masses, !&fixed, &mut forces)
+        (
+            &entities,
+            &positions,
+            &masses,
+            &mut forces,
+            !&fixed,
+            !&dragged,
+        )
             .par_join()
-            .for_each(|(entity, pos, mass, _, force)| {
+            .for_each(|(entity, pos, mass, force, _, _)| {
+                // let norm_pos = Vec2::new(pos.0.x, -(pos.0.y + ((world_size.height >> 1) as f32)));
+
+                // force.0 += -pos.0 + ((world_size.height >> 1) as f32) * mass.0 * gravity_force.0;
+                // force.0 += norm_pos * mass.0 * gravity_force.0;
                 force.0 += -pos.0 * mass.0 * gravity_force.0;
+
                 info!(
                     "(CGF) [{0}] f: {1} | p: {2} | m: {3} | g: {4}",
                     entity.id(),
@@ -680,11 +693,11 @@ impl Default for SimulatorBuilder {
             repel_force: 100.0,
             spring_stiffness: 100.0,
             spring_neutral_length: 200.0,
-            gravity_force: 1.0,
+            gravity_force: 10.0,
             delta_time: 0.005,
             damping: 0.9,
             quadtree_theta: 0.75,
-            freeze_thresh: 20.0,
+            freeze_thresh: 2.0,
         }
     }
 }
