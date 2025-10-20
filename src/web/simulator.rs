@@ -252,6 +252,7 @@ impl<'a> System<'a> for ApplyNodeForce {
     type SystemData = (
         Entities<'a>,
         ReadStorage<'a, Fixed>,
+        ReadStorage<'a, Dragged>,
         ReadStorage<'a, NodeForces>,
         WriteStorage<'a, Velocity>,
         ReadStorage<'a, Mass>,
@@ -260,11 +261,18 @@ impl<'a> System<'a> for ApplyNodeForce {
 
     fn run(
         &mut self,
-        (entities, fixed, forces, mut velocities, masses, delta_time): Self::SystemData,
+        (entities, fixed, dragged, forces, mut velocities, masses, delta_time): Self::SystemData,
     ) {
-        (&entities, !&fixed, &forces, &mut velocities, &masses)
+        (
+            &entities,
+            &forces,
+            &mut velocities,
+            &masses,
+            !&fixed,
+            !&dragged,
+        )
             .par_join()
-            .for_each(|(entity, _, force, velocity, mass)| {
+            .for_each(|(entity, force, velocity, mass, _, _)| {
                 velocity.0 += force.0 / mass.0 * delta_time.0;
                 info!(
                     "(ANF) [{0}] v: {1} | f: {2} | m: {3} | d: {4}",
@@ -286,6 +294,7 @@ impl<'a> System<'a> for UpdateNodePosition {
         WriteStorage<'a, Position>,
         WriteStorage<'a, Velocity>,
         ReadStorage<'a, Fixed>,
+        ReadStorage<'a, Dragged>,
         Read<'a, DeltaTime>,
         Read<'a, Damping>,
         Read<'a, FreezeThreshold>,
@@ -299,22 +308,29 @@ impl<'a> System<'a> for UpdateNodePosition {
             mut positions,
             mut velocities,
             fixed,
+            dragged,
             delta_time,
             damping,
             freeze_threshold,
             updater,
         ): Self::SystemData,
     ) {
-        // for (entity, velocity, _) in (&entities, &mut velocities, &fixeds).join() {
-        //     if freeze_threshold.0 < velocity.0.abs().length() {
-        //         // Update is only visible next dispatch
-        //         updater.remove::<Fixed>(entity);
-        //     }
-        // }
+        for (entity, velocity, _) in (&entities, &mut velocities, &fixed).join() {
+            if freeze_threshold.0 < velocity.0.abs().length() {
+                // Update is only visible next dispatch
+                updater.remove::<Fixed>(entity);
+            }
+        }
 
-        (&entities, &mut positions, &mut velocities, !&fixed)
+        (
+            &entities,
+            &mut positions,
+            &mut velocities,
+            !&fixed,
+            !&dragged,
+        )
             .par_join()
-            .for_each(|(entity, pos, velocity, _)| {
+            .for_each(|(entity, pos, velocity, _, _)| {
                 velocity.0 *= damping.0;
 
                 pos.0 += velocity.0 * delta_time.0;
@@ -327,7 +343,7 @@ impl<'a> System<'a> for UpdateNodePosition {
                 if freeze_threshold.0 > velocity.0.abs().length() {
                     // Update is only visible next dispatch
                     updater.insert(entity, Fixed);
-                    velocity.0 = Vec2::ZERO;
+                    // velocity.0 = Vec2::ZERO;
                 }
             });
     }
@@ -404,15 +420,22 @@ impl<'a, 'b> Simulator<'a, 'b> {
 
     /// Notify simulator that the user started dragging an element.
     pub fn drag_start(&self, entity_id: u32) {
-        debug!("[{0}] Drag start", entity_id);
+        info!("[{0}] Drag start", entity_id);
         let entity = self.world.entities().entity(entity_id);
         let updater = self.world.read_resource::<LazyUpdate>();
+
+        // Enable simulation when node is dragged
+        self.world.entities().par_join().for_each(|entity| {
+            updater.remove::<Fixed>(entity);
+        });
+
+        // Except for the dragged node
         updater.insert(entity, Dragged);
     }
 
     /// Notify simulator that the user stopped dragging an element.
     pub fn drag_end(&self, entity_id: u32) {
-        debug!("[{0}] Drag end", entity_id);
+        info!("[{0}] Drag end", entity_id);
         let entity = self.world.entities().entity(entity_id);
         let updater = self.world.read_resource::<LazyUpdate>();
         updater.remove::<Dragged>(entity);
@@ -420,19 +443,16 @@ impl<'a, 'b> Simulator<'a, 'b> {
 
     /// Update simulator with cursor offset from last position update.
     pub fn dragged(&self, cursor_position: Vec2, window_size: PhysicalSize<u32>, entity_id: u32) {
-        let normalized_width = cursor_position.x.clamp(0.0, window_size.width as f32);
-        let normalized_height = ((cursor_position.y * -1.0) + window_size.height as f32)
-            .clamp(0.0, window_size.height as f32);
+        // Normalize position to wgpu's coordinate system
+        cursor_position.x = cursor_position.x.clamp(0.0, window_size.width as f32);
+        cursor_position.y =
+            (-cursor_position.y + window_size.height as f32).clamp(0.0, window_size.height as f32);
 
-        debug!("[{0}] Dragged position: {1}", entity_id, cursor_position);
-        debug!("[{0}] Computed position: {1}", entity_id, cursor_position);
+        info!("[{0}] Dragged position: {1}", entity_id, cursor_position);
 
         let updater = self.world.read_resource::<LazyUpdate>();
         let entity = self.world.entities().entity(entity_id);
-        updater.insert(
-            entity,
-            Position(Vec2::new(normalized_width, normalized_height)),
-        );
+        updater.insert(entity, Position(cursor_position));
     }
 
     // TODO: Implement with signals

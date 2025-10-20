@@ -672,14 +672,18 @@ impl State {
     pub fn handle_mouse_key(&mut self, button: MouseButton, is_pressed: bool) {
         match (button, is_pressed) {
             (MouseButton::Left, true) => {
-                // Begin node dragging on mouse click
-                self.node_dragged = true;
-                self.simulator.drag_start(0);
+                if !self.paused {
+                    // Begin node dragging on mouse click
+                    self.node_dragged = true;
+                    self.simulator.drag_start(0);
+                }
             }
             (MouseButton::Left, false) => {
-                // Stop node dragging on mouse release
-                self.node_dragged = false;
-                self.simulator.drag_end(0);
+                if !self.paused {
+                    // Stop node dragging on mouse release
+                    self.node_dragged = false;
+                    self.simulator.drag_end(0);
+                }
             }
             (MouseButton::Right, false) => {
                 // Radial menu on mouse release
