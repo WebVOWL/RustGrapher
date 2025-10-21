@@ -51,7 +51,7 @@ pub struct State {
     paused: bool,
 
     // User input
-    cursor_position: Option<PhysicalPosition<f64>>,
+    cursor_position: Option<Vec2>,
     node_dragged: bool,
 
     // Glyphon resources are initialized lazily when we have a non-zero surface.
@@ -434,17 +434,6 @@ impl State {
 
     pub fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
-            {
-                let mut sim_channel = self
-                    .simulator
-                    .world
-                    .fetch_mut::<EventChannel<SimulatorEvent>>();
-                sim_channel.single_write(SimulatorEvent::WindowResized {
-                    width: width,
-                    height: height,
-                });
-            }
-
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
@@ -459,6 +448,11 @@ impl State {
             let data = [width as f32, height as f32, 0.0f32, 0.0f32];
             self.queue
                 .write_buffer(&self.resolution_buffer, 0, bytemuck::cast_slice(&data));
+
+            self.simulator.send_event(SimulatorEvent::WindowResized {
+                width: width,
+                height: height,
+            });
         }
     }
 
@@ -672,18 +666,20 @@ impl State {
     pub fn handle_mouse_key(&mut self, button: MouseButton, is_pressed: bool) {
         match (button, is_pressed) {
             (MouseButton::Left, true) => {
-                if !self.paused {
-                    // Begin node dragging on mouse click
+                // Begin node dragging on mouse click
+                // if !self.paused {
+                if let Some(pos) = self.cursor_position {
                     self.node_dragged = true;
-                    self.simulator.drag_start(0);
+                    self.simulator.send_event(SimulatorEvent::DragStart(pos));
+                    // }
                 }
             }
             (MouseButton::Left, false) => {
-                if !self.paused {
-                    // Stop node dragging on mouse release
-                    self.node_dragged = false;
-                    self.simulator.drag_end(0);
-                }
+                // Stop node dragging on mouse release
+                // if !self.paused {
+                self.node_dragged = false;
+                self.simulator.send_event(SimulatorEvent::DragEnd);
+                // }
             }
             (MouseButton::Right, false) => {
                 // Radial menu on mouse release
@@ -693,14 +689,10 @@ impl State {
     }
     pub fn handle_cursor(&mut self, position: PhysicalPosition<f64>) {
         // (x,y) coords in pixels relative to the top-left corner of the window
-        self.cursor_position = Some(position);
+        self.cursor_position = Some(Vec2::new(position.x as f32, position.y as f32));
         if self.node_dragged {
             if let Some(pos) = self.cursor_position {
-                self.simulator.dragged(
-                    Vec2::new(pos.x as f32, pos.y as f32),
-                    self.window.inner_size(),
-                    0,
-                );
+                self.simulator.send_event(SimulatorEvent::Dragged(pos));
             }
         }
     }

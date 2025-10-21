@@ -34,4 +34,13 @@ pub enum SimulatorEvent {
 
     /// The dimensions of the simulated world has changed.
     WindowResized { width: u32, height: u32 },
+
+    /// A node is being dragged.
+    DragStart(Vec2),
+
+    /// A node is no longer being dragged.
+    DragEnd,
+
+    /// The position of the dragged node has changed.
+    Dragged(Vec2),
 }
