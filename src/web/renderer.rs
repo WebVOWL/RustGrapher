@@ -1,3 +1,4 @@
+mod node_shape;
 mod node_types;
 mod vertex_buffer;
 
@@ -20,7 +21,10 @@ use wasm_bindgen::prelude::*;
 
 use vertex_buffer::{NodeInstance, VERTICES, Vertex};
 
-use crate::web::simulator::Simulator;
+use crate::web::{
+    renderer::{node_shape::NodeShape, vertex_buffer::EdgeInstance},
+    simulator::Simulator,
+};
 
 use crate::web::renderer::node_types::NodeType;
 
@@ -52,7 +56,9 @@ struct State {
     positions: Vec<[f32; 2]>,
     labels: Vec<String>,
     edges: Vec<[usize; 2]>,
+    edge_center_positions: Vec<[f32; 2]>,
     node_types: Vec<NodeType>,
+    node_shapes: Vec<NodeShape>,
     frame_count: u64, // TODO: Remove after implementing simulator
 
     // Glyphon resources are initialized lazily when we have a non-zero surface.
@@ -230,10 +236,32 @@ impl State {
             NodeType::Datatype,
         ];
 
+        let node_shapes = vec![
+            NodeShape::Circle { r: 2.0 },
+            NodeShape::Circle { r: 1.0 },
+            NodeShape::Circle { r: 1.0 },
+            NodeShape::Circle { r: 1.0 },
+            NodeShape::Circle { r: 0.8 },
+            NodeShape::Circle { r: 1.2 },
+            NodeShape::Circle { r: 1.1 },
+            NodeShape::Circle { r: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Circle { r: 1.0 },
+            NodeShape::Circle { r: 1.0 },
+            NodeShape::Circle { r: 1.0 },
+            NodeShape::Circle { r: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Rectangle { w: 1.5, h: 0.5 },
+        ];
+
         // Combine positions and types into NodeInstance entries
 
-        let node_instance_buffer =
-            vertex_buffer::create_node_instance_buffer(&device, &positions, &node_types);
+        let node_instance_buffer = vertex_buffer::create_node_instance_buffer(
+            &device,
+            &positions,
+            &node_types,
+            &node_shapes,
+        );
         let num_instances = positions.len() as u32;
 
         // Create bind group 0 with only the resolution uniform (binding 0)
@@ -309,13 +337,15 @@ impl State {
         let num_vertices = VERTICES.len() as u32;
 
         // TODO: remove test edges after adding simulator
-        let edges = [[0, 1]];
-        let mut edge_positions: Vec<[[f32; 2]; 3]> = vec![];
-        for edge in edges {
-            edge_positions.push([positions[edge[0]], positions[edge[1]], [50.0, 500.0]]);
-        }
-        let edge_instance_buffer =
-            vertex_buffer::create_edge_instance_buffer(&device, &edge_positions);
+        let edges = [[0, 1], [14, 8]];
+        let edge_center_positions = [[50.0, 500.0], [1300.0, 150.0]];
+        let edge_instance_buffer = vertex_buffer::create_edge_instance_buffer(
+            &device,
+            &edges,
+            &edge_center_positions,
+            &positions,
+            &node_shapes,
+        );
         let num_edge_instances = edges.len() as u32;
 
         let edge_shader =
@@ -404,7 +434,9 @@ impl State {
             positions: positions.to_vec(),
             labels,
             edges: edges.to_vec(),
+            edge_center_positions: edge_center_positions.to_vec(),
             node_types: node_types.to_vec(),
+            node_shapes,
             frame_count: 0,
             font_system,
             swash_cache,
@@ -720,23 +752,42 @@ impl State {
         self.frame_count += 1;
         let t = ((self.frame_count as f32) * 0.05).sin();
 
-        // Update node positions
         self.positions[1] = [self.positions[1][0], self.positions[1][1] + t];
 
-        let nodes: Vec<NodeInstance> = self
-            .positions
-            .iter()
-            .zip(self.node_types.iter())
-            .map(|(pos, ty)| NodeInstance {
+        let mut nodes: Vec<NodeInstance> = Vec::with_capacity(self.positions.len());
+        for (i, pos) in self.positions.iter().enumerate() {
+            let (shape_type, shape_dim) = match self.node_shapes[i] {
+                NodeShape::Circle { r } => (0, [r, 0.0]),
+                NodeShape::Rectangle { w, h } => (1, [w, h]),
+            };
+            nodes.push(NodeInstance {
                 position: *pos,
-                node_type: *ty as u32,
-            })
-            .collect();
+                node_type: self.node_types[i] as u32,
+                shape_type,
+                shape_dim,
+            });
+        }
 
-        let mut edge_positions: Vec<[[f32; 2]; 2]> = vec![];
-        // Update edge endpoints from node positions
-        for edge in &mut self.edges {
-            edge_positions.push([self.positions[edge[0]], self.positions[edge[1]]]);
+        let mut edge_positions: Vec<EdgeInstance> = Vec::with_capacity(self.edges.len());
+        for (i, edge) in self.edges.iter().enumerate() {
+            let start = self.positions[edge[0]];
+            let end = self.positions[edge[1]];
+            let center = if i < self.edge_center_positions.len() {
+                self.edge_center_positions[i]
+            } else {
+                [(start[0] + end[0]) * 0.5, (start[1] + end[1]) * 0.5]
+            };
+            let (shape_type, shape_dim) = match self.node_shapes[i] {
+                NodeShape::Circle { r } => (0, [r, 0.0]),
+                NodeShape::Rectangle { w, h } => (1, [w, h]),
+            };
+            edge_positions.push(EdgeInstance {
+                start: start,
+                end: end,
+                center: center,
+                shape_type: shape_type,
+                shape_dim: shape_dim,
+            });
         }
 
         self.queue.write_buffer(

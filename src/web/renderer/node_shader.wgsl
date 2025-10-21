@@ -1,13 +1,17 @@
 struct VertIn {
-    @location(0) quad_pos: vec2<f32>, // [-1..1] quad corner in local space
-    @location(1) inst_pos: vec2<f32>, // per-instance node position in pixels
-    @location(2) node_type: u32, // Type of node used when drawing
+    @location(0) quad_pos: vec2<f32>,         // [-1..1] quad corner in local space
+    @location(1) inst_pos: vec2<f32>,         // per-instance node position in pixels
+    @location(2) node_type: u32,              // Type of node used when drawing
+    @location(3) shape: u32,                  // The shape of the node, 0: Circle, 1: Rectangle
+    @location(4) shape_dimensions: vec2<f32>, // The radius of a circle or the width and height of a rectangle
 };
 
 struct VertOut {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) v_uv: vec2<f32>, // 0..1 inside quad
-    @location(1) node_type: u32,
+    @location(1) v_node_type: u32,
+    @location(2) v_shape: u32,
+    @location(3) v_shape_dimensions: vec2<f32>,
 };
 
 @group(0) @binding(0)
@@ -27,7 +31,7 @@ fn vs_node_main(
     let pos_px: vec2<f32> = in.inst_pos;
 
     // quad_pos is [-1..1] so convert to offset in pixels
-    let offset_px = in.quad_pos * vec2(NODE_RADIUS_PIX);
+    let offset_px = in.quad_pos * vec2(NODE_RADIUS_PIX * in.shape_dimensions.x);
 
     // screen position in pixels
     let screen = pos_px + offset_px;
@@ -40,9 +44,9 @@ fn vs_node_main(
     // uv 0..1 for circle mask; quad_pos [-1..1] -> uv [0..1]
     out.v_uv = in.quad_pos * 0.5 + vec2<f32>(0.5, 0.5);
 
-    out.node_type = in.node_type;
-
-    out.node_type = in.node_type;
+    out.v_node_type = in.node_type;
+    out.v_shape = in.shape;
+    out.v_shape_dimensions = in.shape_dimensions;
 
     return out;
 }
@@ -67,11 +71,7 @@ const SET_COLOR = vec3<f32>(0.4, 0.6, 0.8);
 
 @fragment
 fn fs_node_main(in: VertOut) -> @location(0) vec4<f32> {
-    // circle distance
-    
-    let v_uv = in.v_uv;
-
-    return draw_node_by_type(in.node_type, v_uv);
+    return draw_node_by_type(in.v_node_type, in.v_uv, in.v_shape_dimensions);
 }
 
 fn draw_class(v_uv: vec2<f32>) -> vec4<f32> {
@@ -121,7 +121,7 @@ fn draw_external_class(v_uv: vec2<f32>) -> vec4<f32> {
 
 fn draw_thing(v_uv: vec2<f32>) -> vec4<f32> {
     let d = distance(v_uv, vec2<f32>(0.5, 0.5));
-    let r = 0.43;
+    let r = 0.48;
     // smooth fill mask (circle inside without border)
     var fill_mask = 1.0 - smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d);
 
@@ -408,9 +408,9 @@ fn draw_anonymous_class(v_uv: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(col, alpha);
 }
 
-fn draw_literal(v_uv: vec2<f32>) -> vec4<f32> {
+fn draw_literal(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
     let rect_center = vec2<f32>(0.5, 0.5);
-    let rect_size = vec2(0.9, 0.25);
+    let rect_size = vec2(0.9, 0.25 * shape_dimensions.y);
     let dot_count_rect = 11.0;
     let dot_radius_rect = 0.3;
     let fill_color = LITERAL_COLOR;
@@ -537,9 +537,9 @@ fn draw_rdfs_resource(v_uv: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(col, alpha);
 }
 
-fn draw_datatype(v_uv: vec2<f32>) -> vec4<f32> {
+fn draw_datatype(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
     let rect_center = vec2<f32>(0.5, 0.5);
-    let rect_size = vec2(0.9, 0.25);
+    let rect_size = vec2(0.9, 0.25 * shape_dimensions.y);
     let fill_color = LITERAL_COLOR;
     let border_thickness_rect = 0.02;
 
@@ -579,7 +579,7 @@ fn draw_datatype(v_uv: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(col, alpha);
 }
 
-fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>) -> vec4<f32> {
+fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
     switch node_type {
         case 0: {return draw_class(v_uv);}
         case 1: {return draw_external_class(v_uv);}
@@ -591,10 +591,10 @@ fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>) -> vec4<f32> {
         case 7: {return draw_complement(v_uv);}
         case 8: {return draw_deprecated_class(v_uv);}
         case 9: {return draw_anonymous_class(v_uv);}
-        case 10: {return draw_literal(v_uv);}
+        case 10: {return draw_literal(v_uv, shape_dimensions);}
         case 11: {return draw_rdfs_class(v_uv);}
         case 12: {return draw_rdfs_resource(v_uv);}
-        case 13: {return draw_datatype(v_uv);}
-        default: {return draw_class(v_uv);}
+        case 13: {return draw_datatype(v_uv, shape_dimensions);}
+        default: {return vec4<f32>(0.0);}
     }
 }

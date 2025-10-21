@@ -1,8 +1,10 @@
 struct VertIn {
-    @location(0) quad_pos: vec2<f32>, // [-1..1]
-    @location(1) start: vec2<f32>,    // start of edge (in px)
-    @location(2) end: vec2<f32>,      // end of edge (in px)
-    @location(3) center: vec2<f32>,   // point ON curve at t=0.5 (in px)
+    @location(0) quad_pos: vec2<f32>,         // [-1..1]
+    @location(1) start: vec2<f32>,            // start of edge (in px)
+    @location(2) end: vec2<f32>,              // end of edge (in px)
+    @location(3) center: vec2<f32>,           // point ON curve at t=0.5 (in px)
+    @location(4) end_shape: u32,              // The shape of the node pointed to, 0: Circle, 1: Rectangle
+    @location(5) shape_dimensions: vec2<f32>, // The radius of a circle or the width and height of a rectangle
 };
 
 struct VertOut {
@@ -13,6 +15,8 @@ struct VertOut {
     @location(3) v_end: vec2<f32>,
     @location(4) v_mbr_min: vec2<f32>,
     @location(5) v_mbr_max: vec2<f32>,
+    @location(6) v_end_shape: u32,
+    @location(7) v_shape_dimensions: vec2<f32>,
 };
 
 @group(0) @binding(0)
@@ -73,13 +77,20 @@ fn vs_edge_main(in: VertIn) -> VertOut {
     out.v_end = p2;
     out.v_mbr_min = min_p;
     out.v_mbr_max = max_p;
+    out.v_end_shape = in.end_shape;
+    out.v_shape_dimensions = in.shape_dimensions;
 
     return out;
 }
 
+// arrow constants (pixels)
+const ARROW_LENGTH_PX = 10.0;
+const ARROW_WIDTH_PX  = 10.0;
+const ARROW_AA_PX     = 1.5; // anti-alias softness in pixels
+
 @fragment
 fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
-    let px = mix(in.v_mbr_min, in.v_mbr_max, in.v_uv);
+    let px = mix(in.v_mbr_min, in.v_mbr_max, in.v_uv); // this fragment's pixel position
     let p0 = in.v_start;
     let ctrl = in.v_center_ctrl;
     let p2 = in.v_end;
@@ -87,9 +98,7 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     // Precompute polynomial coefficients for quadratic: B(t) = a*t^2 + b*t + p0
     let a = p0 - 2.0 * ctrl + p2;
     let b = 2.0 * (ctrl - p0);
-    let _c = p0 - px;
 
-    // Initial sample (cheap safety fallback)
     var best_d2 = 1e12;
     var best_t = 0.0;
     for (var i = 0u; i <= 8u; i = i + 1u) {
@@ -102,7 +111,6 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
         }
     }
 
-    // refine with Newton iteration around best_t
     var t = best_t;
     for (var i = 0; i < 8; i = i + 1) {
         let bt  = a * t * t + b * t + p0;
@@ -117,10 +125,69 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     let bt = bezier(p0, ctrl, p2, t);
     let dist = length(bt - px);
 
-    let alpha = 1.0 - smoothstep(LINE_THICKNESS - AA_SOFTNESS,
-                                 LINE_THICKNESS,
-                                 dist);
+    // line alpha (anti-aliased)
+    let line_alpha = 1.0 - smoothstep(LINE_THICKNESS - AA_SOFTNESS, LINE_THICKNESS, dist);
+
+    // Arrow
+    // tangent at t=1:
+    let tangent = 2.0 * a + b; // derivative at t=1
+    var dir = tangent;
+    let dir_len = length(dir);
+    if (dir_len < 1e-6) {
+        dir = normalize(p2 - p0);
+    } else {
+        dir = dir / dir_len;
+    }
+
+    // find intersection point with node shape boundary
+    var tip = p2;
+    let shape_type = i32(in.v_end_shape);
+    let dims = in.v_shape_dimensions;
+
+    // Circle shape
+    if (shape_type == 0) {
+        let radius = dims.x;
+        tip = p2 - dir * radius;
+    }
+
+    // Rectangle
+    if (shape_type == 1) {
+        let half_size = dims;
+        // Ray-box intersection: find smallest positive t where |p2 - dir*t| hits the box
+        let inv_dir = 1.0 / dir;
+        let t1 = (-half_size - vec2<f32>(0.0)) * inv_dir;
+        let t2 = (half_size - vec2<f32>(0.0)) * inv_dir;
+        let tmin = max(min(t1.x, t2.x), min(t1.y, t2.y));
+        let tmax = min(max(t1.x, t2.x), max(t1.y, t2.y));
+        let t_hit = max(tmin, 0.0);
+        tip = p2 - dir * t_hit;
+    }
+
+    // Define triangle: tip at intersection point, base behind tip
+    let base_center = tip - dir * ARROW_LENGTH_PX;
+    let perp = vec2<f32>(-dir.y, dir.x);
+    let halfw = ARROW_WIDTH_PX * 0.5;
+    let left = base_center + perp * halfw;
+    let right = base_center - perp * halfw;
+
+    let area_total = tri_area(tip, left, right);
+    let area_sub = tri_area(px, left, right) + tri_area(tip, px, right) + tri_area(tip, left, px);
+    let area_diff = abs(area_sub - area_total);
+
+    var arrow_alpha = 0.0;
+    if (area_total > 1e-5) {
+        let normalized_diff = area_diff / area_total;
+        arrow_alpha = clamp(1.0 - smoothstep(0.0, 0.06, normalized_diff), 0.0, 1.0);
+    }
 
     let color = vec3<f32>(0.0);
-    return vec4<f32>(color, alpha);
+
+    let final_alpha = max(line_alpha, arrow_alpha);
+
+    return vec4<f32>(color, final_alpha);
+}
+
+// Simple point-in-triangle check
+fn tri_area(a: vec2<f32>, b: vec2<f32>, c: vec2<f32>) -> f32 {
+    return abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) * 0.5;
 }

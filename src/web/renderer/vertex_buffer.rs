@@ -1,6 +1,6 @@
 use wgpu::util::DeviceExt;
 
-use crate::web::renderer::node_types::NodeType;
+use crate::web::renderer::{node_shape::NodeShape, node_types::NodeType};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -51,12 +51,13 @@ pub const VERTICES: &[Vertex] = &[
 pub struct NodeInstance {
     pub position: [f32; 2],
     pub node_type: u32,
+    pub shape_type: u32,     // 0 = Circle, 1 = Rectangle
+    pub shape_dim: [f32; 2], // [r, _] for Circle or [w, h] for Rectangle
 }
 
 impl NodeInstance {
-    // locations 1 -> Float32x2, 2 -> Uint32 (node_type)
-    const ATTRIBS: [wgpu::VertexAttribute; 2] =
-        wgpu::vertex_attr_array![1 => Float32x2, 2 => Uint32];
+    const ATTRIBS: [wgpu::VertexAttribute; 4] =
+        wgpu::vertex_attr_array![1 => Float32x2, 2 => Uint32, 3 => Uint32, 4 => Float32x2];
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         use std::mem;
@@ -73,19 +74,25 @@ pub fn create_node_instance_buffer(
     device: &wgpu::Device,
     positions: &[[f32; 2]],
     node_types: &[NodeType],
+    node_shapes: &[NodeShape],
 ) -> wgpu::Buffer {
-    let nodes: Vec<NodeInstance> = positions
-        .iter()
-        .zip(node_types.iter())
-        .map(|(pos, ty)| NodeInstance {
+    let mut node_instances: Vec<NodeInstance> = vec![];
+    for (i, pos) in positions.iter().enumerate() {
+        let (shape_type, shape_dim) = match node_shapes[i] {
+            NodeShape::Circle { r } => (0, [r, 0.0]),
+            NodeShape::Rectangle { w, h } => (1, [w, h]),
+        };
+        node_instances.push(NodeInstance {
             position: *pos,
-            node_type: *ty as u32,
-        })
-        .collect();
-    // positions are stored as contiguous vec2<f32> matching Instance.position
+            node_type: node_types[i] as u32,
+            shape_type: shape_type,
+            shape_dim,
+        });
+    }
+
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("instance_node_buffer"),
-        contents: bytemuck::cast_slice(&nodes),
+        contents: bytemuck::cast_slice(&node_instances),
         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
     })
 }
@@ -96,12 +103,18 @@ pub struct EdgeInstance {
     pub start: [f32; 2],
     pub end: [f32; 2],
     pub center: [f32; 2],
+    pub shape_type: u32,     // 0 = Circle, 1 = Rectangle
+    pub shape_dim: [f32; 2], // [r, _] for Circle or [w, h] for Rectangle
 }
 
 impl EdgeInstance {
-    // locations 1, 2 and 3: start, end, and center for curved lines
-    const ATTRIBS: [wgpu::VertexAttribute; 3] =
-        wgpu::vertex_attr_array![1 => Float32x2, 2 => Float32x2, 3 => Float32x2];
+    const ATTRIBS: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
+        1 => Float32x2,
+        2 => Float32x2,
+        3 => Float32x2,
+        4 => Uint32,
+        5 => Float32x2,
+    ];
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         use std::mem;
@@ -113,10 +126,37 @@ impl EdgeInstance {
     }
 }
 
-pub fn create_edge_instance_buffer(device: &wgpu::Device, edges: &[[[f32; 2]; 3]]) -> wgpu::Buffer {
+pub fn create_edge_instance_buffer(
+    device: &wgpu::Device,
+    edges: &[[usize; 2]],
+    center_positions: &[[f32; 2]],
+    node_positions: &[[f32; 2]],
+    node_shapes: &[NodeShape],
+) -> wgpu::Buffer {
+    let mut edge_instances = Vec::with_capacity(edges.len());
+
+    for (center_idx, &[start_idx, end_idx]) in edges.iter().enumerate() {
+        let start = node_positions[start_idx];
+        let center = center_positions[center_idx];
+        let end = node_positions[end_idx];
+
+        let (shape_type, shape_dim) = match node_shapes[end_idx] {
+            NodeShape::Circle { r } => (0, [r, 0.0]),
+            NodeShape::Rectangle { w, h } => (1, [w, h]),
+        };
+
+        edge_instances.push(EdgeInstance {
+            start,
+            center,
+            end,
+            shape_type,
+            shape_dim,
+        });
+    }
+
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("edge_instance_buffer"),
-        contents: bytemuck::cast_slice(edges),
+        contents: bytemuck::cast_slice(&edge_instances),
         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
     })
 }
