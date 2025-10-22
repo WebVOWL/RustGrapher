@@ -7,7 +7,7 @@ struct VertIn {
 struct VertOut {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) v_uv: vec2<f32>, // 0..1 inside quad
-    @location(1) node_type: u32,
+    @interpolate(flat) @location(1) node_type: u32,
 };
 
 @group(0) @binding(0)
