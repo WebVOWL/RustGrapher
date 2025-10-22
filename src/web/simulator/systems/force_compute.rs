@@ -189,14 +189,14 @@ impl<'a> System<'a> for ApplyNodeForce {
             .par_join()
             .for_each(|(entity, force, velocity, mass, _, _)| {
                 velocity.0 += force.0 / mass.0 * delta_time.0;
-                info!(
-                    "(ANF) [{0}] v: {1} | f: {2} | m: {3} | d: {4}",
-                    entity.id(),
-                    velocity.0,
-                    force.0,
-                    mass.0,
-                    delta_time.0
-                );
+                // info!(
+                //     "(ANF) [{0}] v: {1} | f: {2} | m: {3} | d: {4}",
+                //     entity.id(),
+                //     velocity.0,
+                //     force.0,
+                //     mass.0,
+                //     delta_time.0
+                // );
             });
     }
 }

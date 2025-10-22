@@ -21,8 +21,11 @@ use crate::web::{
             force_compute::{
                 ApplyNodeForce, ComputeEdgeForces, ComputeGravityForce, ComputeNodeForce,
             },
-            location_detect::PointIntersect,
-            position_update::{DragEnd, DragStart, Dragging, UpdateNodePosition},
+            location_detect::{PointIntersectSystemData, point_intersect},
+            position_update::{
+                DragEndSystemData, DragStartSystemData, DraggingSystemData, UpdateNodePosition,
+                sys_drag_end, sys_drag_start, sys_dragging,
+            },
         },
     },
 };
@@ -39,12 +42,11 @@ use std::collections::HashMap;
 use winit::dpi::PhysicalSize;
 
 #[derive(Default)]
-struct EventManager<'a> {
+struct EventManager {
     pub reader: Option<ReaderId<SimulatorEvent>>,
-    simulator: Option<Simulator<'a, 'a>>,
 }
 
-impl<'a> System<'a> for EventManager<'a> {
+impl<'a> System<'a> for EventManager {
     type SystemData = (
         Read<'a, EventChannel<SimulatorEvent>>,
         Write<'a, RepelForce>,
@@ -90,16 +92,17 @@ impl<'a> System<'a> for EventManager<'a> {
                     world_size.height = *height
                 }
                 SimulatorEvent::DragStart(cursor_pos) => {
-                    cursor_position = cursor_pos;
-                    if let Some(simulator) = self.simulator {
-                        PointIntersect::default().run_now(&self.simulator.world);
-                        DragStart::default().run_now(&self.simulator.world);
-                    }
+                    cursor_position.0 = *cursor_pos;
+                    // world.exec(point_intersect);
+
+                    // world.exec(sys_drag_start);
                 }
-                SimulatorEvent::DragEnd => DragEnd::default().run_now(&self.simulator.world),
+                SimulatorEvent::DragEnd => {
+                    // world.exec(sys_drag_end);
+                }
                 SimulatorEvent::Dragged(cursor_pos) => {
-                    cursor_position = cursor_pos;
-                    Dragging::default().run_now(&self.simulator.world);
+                    cursor_position.0 = *cursor_pos;
+                    // world.exec(sys_dragging);
                 }
             }
         }
@@ -147,16 +150,110 @@ impl<'a> System<'a> for QuadTreeConstructor {
     }
 }
 
+type EventSystemData = (
+    Read<'a, EventChannel<SimulatorEvent>>,
+    Write<'a, RepelForce>,
+    Write<'a, SpringStiffness>,
+    Write<'a, SpringNeutralLength>,
+    Write<'a, GravityForce>,
+    Write<'a, DeltaTime>,
+    Write<'a, Damping>,
+    Write<'a, QuadTreeTheta>,
+    Write<'a, FreezeThreshold>,
+    Write<'a, WorldSize>,
+    Write<'a, CursorPosition>,
+);
+
 //#[warn(dead_code = false)]
 pub struct Simulator<'a, 'b> {
     pub world: World,
     pub dispatcher: Dispatcher<'a, 'b>,
+    event_channel: EventChannel<SimulatorEvent>,
+    /// Event channel reader ID
+    reader_id: ReaderId<SimulatorEvent>,
 }
 
 impl<'a, 'b> Simulator<'a, 'b> {
     pub fn builder() -> SimulatorBuilder {
         SimulatorBuilder::default()
     }
+
+    pub fn tick(&mut self) {
+        let event_data: EventSystemData = self.world.system_data();
+        self.simulator_event(event_data);
+        self.dispatcher.dispatch(&self.world);
+        self.world.maintain();
+    }
+
+    fn simulator_event(
+        &mut self,
+        (
+            events,
+            mut repel_force,
+            mut spring_stiffness,
+            mut spring_length,
+            mut gravity_force,
+            mut deltatime,
+            mut damping,
+            mut quadtree_theta,
+            mut freeze_threshold,
+            mut world_size,
+            mut cursor_position,
+        ): EventSystemData,
+    ) {
+        for event in events.read(&mut self.reader_id.as_mut()) {
+            match event {
+                SimulatorEvent::RepelForceUpdated(value) => repel_force.0 = *value,
+                SimulatorEvent::SpringStiffnessUpdated(value) => spring_stiffness.0 = *value,
+                SimulatorEvent::SpringNeutralLengthUpdated(value) => spring_length.0 = *value,
+                SimulatorEvent::GravityForceUpdated(value) => gravity_force.0 = *value,
+                SimulatorEvent::DeltaTimeUpdated(value) => deltatime.0 = *value,
+                SimulatorEvent::DampingUpdated(value) => damping.0 = *value,
+                SimulatorEvent::SimulationAccuracyUpdated(value) => quadtree_theta.0 = *value,
+                SimulatorEvent::FreezeThresholdUpdated(value) => freeze_threshold.0 = *value,
+                SimulatorEvent::WindowResized { width, height } => {
+                    world_size.width = *width;
+                    world_size.height = *height
+                }
+                SimulatorEvent::DragStart(cursor_pos) => {
+                    cursor_position.0 = *cursor_pos;
+                    // world.exec(point_intersect);
+                    // world.exec(sys_drag_start);
+                }
+                SimulatorEvent::DragEnd => {
+                    // world.exec(sys_drag_end);
+                }
+                SimulatorEvent::Dragged(cursor_pos) => {
+                    cursor_position.0 = *cursor_pos;
+                    // world.exec(sys_dragging);
+                }
+            }
+        }
+    }
+
+    // /// A node is being dragged.
+    // pub fn drag_start(&mut self, cursor_pos: Vec2) {
+    //     {
+    //         let mut cursor_position = self.world.fetch_mut::<CursorPosition>();
+    //         cursor_position.0 = cursor_pos;
+    //     }
+    //     self.world.exec(point_intersect);
+    //     self.world.exec(sys_drag_start);
+    // }
+
+    // /// A node is no longer being dragged.
+    // pub fn drag_end(&mut self) {
+    //     self.world.exec(sys_drag_end)
+    // }
+
+    // /// The position of the dragged node has changed.
+    // pub fn dragging(&mut self, cursor_pos: Vec2) {
+    //     {
+    //         let mut cursor_position = self.world.fetch_mut::<CursorPosition>();
+    //         cursor_position.0 = cursor_pos;
+    //     }
+    //     self.world.exec(sys_dragging);
+    // }
 
     pub fn send_event(&self, event: SimulatorEvent) {
         let mut sim_channel = self.world.fetch_mut::<EventChannel<SimulatorEvent>>();
@@ -274,18 +371,11 @@ impl SimulatorBuilder {
     pub fn build<'a, 'b>(self, nodes: Vec<Vec2>, edges: Vec<[u32; 2]>) -> Simulator<'a, 'b> {
         let mut world = World::new();
         let mut dispatcher = DispatcherBuilder::new()
-            .with(
-                EventManager {
-                    simulator: self,
-                    ..Default::default()
-                },
-                "event_manager",
-                &[],
-            )
+            .with(EventManager::default(), "event_manager", &[])
             .with(QuadTreeConstructor, "quadtree_constructor", &[])
             .with(
                 ComputeNodeForce,
-                "compute_gravity_force",
+                "compute_node_force",
                 &["quadtree_constructor"],
             )
             .with(ComputeGravityForce, "compute_gravity_force", &[])
@@ -297,7 +387,7 @@ impl SimulatorBuilder {
             .with(
                 ApplyNodeForce,
                 "apply_node_force",
-                &["compute_gravity_force", "compute_gravity_force"],
+                &["compute_node_force", "compute_gravity_force"],
             )
             .with(
                 UpdateNodePosition,
@@ -372,10 +462,10 @@ impl Default for SimulatorBuilder {
     /// Get a Instance of `SimulatorBuilder` with default values
     fn default() -> Self {
         Self {
-            repel_force: 100.0,
+            repel_force: 200.0,
             spring_stiffness: 100.0,
             spring_neutral_length: 200.0,
-            gravity_force: 10.0,
+            gravity_force: 20.0,
             delta_time: 0.005,
             damping: 0.9,
             quadtree_theta: 0.75,

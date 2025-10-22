@@ -671,6 +671,8 @@ impl State {
                 if let Some(pos) = self.cursor_position {
                     self.node_dragged = true;
                     self.simulator.send_event(SimulatorEvent::DragStart(pos));
+
+                    // self.simulator.drag_start(pos);
                     // }
                 }
             }
@@ -679,6 +681,8 @@ impl State {
                 // if !self.paused {
                 self.node_dragged = false;
                 self.simulator.send_event(SimulatorEvent::DragEnd);
+
+                // self.simulator.drag_end();
                 // }
             }
             (MouseButton::Right, false) => {
@@ -693,6 +697,8 @@ impl State {
         if self.node_dragged {
             if let Some(pos) = self.cursor_position {
                 self.simulator.send_event(SimulatorEvent::Dragged(pos));
+
+                // self.simulator.dragging(pos);
             }
         }
     }

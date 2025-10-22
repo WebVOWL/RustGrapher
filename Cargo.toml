@@ -59,7 +59,7 @@
 
     [dependencies.specs]
         default-features=false
-        features=["specs-derive", "parallel", "stdweb"]
+        features=["derive", "parallel", "stdweb"]
         git="https://github.com/WebVOWL/specs"
         version="0.20.1"
 

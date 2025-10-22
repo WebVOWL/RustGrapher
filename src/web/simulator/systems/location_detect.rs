@@ -20,6 +20,7 @@ use glam::Vec2;
 use log::info;
 use rayon::prelude::*;
 use specs::prelude::*;
+use specs::shred;
 use specs::shrev::EventChannel;
 use specs::{
     Builder, Dispatcher, DispatcherBuilder, Entities, Join, LazyUpdate, ParJoin, Read, ReadExpect,
@@ -48,8 +49,38 @@ impl<'a> System<'a> for PointIntersect {
             {
                 // This node contains the cursor's position.
                 // It is the node being dragged.
-                intersection.0 = entity;
+                intersection.0 = entity.id();
+                info!("Point {0} intersect [{1}]", cursor_position.0, entity.id());
             }
         }
     }
 }
+
+// #[derive(SystemData)]
+// pub struct PointIntersectSystemData<'a> {
+//     entities: Entities<'a>,
+//     positions: ReadStorage<'a, Position>,
+//     cursor_position: Read<'a, CursorPosition>,
+//     intersection: Write<'a, PointIntersection>,
+// }
+
+// /// TODO: Implement using quadtree to improve performance
+// pub fn point_intersect(mut data: PointIntersectSystemData) {
+//     for (entity, pos) in (&*data.entities, &data.positions).join() {
+//         const NODE_RADIUS: f32 = 48.0;
+//         if (data.cursor_position.0.x - pos.0.x).powi(2)
+//             + (data.cursor_position.0.y - pos.0.y).powi(2)
+//             < NODE_RADIUS.powi(2)
+//         {
+//             // This node contains the cursor's position.
+//             // It is the node being dragged.
+//             data.intersection.0 = entity.id();
+
+//             info!(
+//                 "Point {0} intersect [{1}]",
+//                 data.cursor_position.0,
+//                 entity.id()
+//             );
+//         }
+//     }
+// }

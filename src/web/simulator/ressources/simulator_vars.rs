@@ -1,7 +1,6 @@
 //! Ressources used by the graph simulator.
 
 use glam::Vec2;
-use specs::Entity;
 
 /// How strong nodes should push others away.
 #[derive(Default)]
@@ -60,4 +59,4 @@ pub struct CursorPosition(pub Vec2);
 /// The entity ID of the node where the cursor position
 /// is within the circumference of said node.
 #[derive(Default)]
-pub struct PointIntersection(pub Entity);
+pub struct PointIntersection(pub u32);
