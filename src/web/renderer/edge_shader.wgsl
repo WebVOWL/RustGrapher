@@ -110,7 +110,7 @@ fn dist_and_t_to_bezier(px: vec2<f32>, p0: vec2<f32>, ctrl: vec2<f32>, p2: vec2<
 
     // Newton-Raphson refine
     var t = best_t;
-    for (var iter = 0; iter < 6; iter = iter + 1) {
+    for (var iter = 0; iter < 8; iter = iter + 1) {
         let bt = a * t * t + b * t + p0;
         let dBt = 2.0 * a * t + b;
         let diff = bt - px;
@@ -125,7 +125,7 @@ fn dist_and_t_to_bezier(px: vec2<f32>, p0: vec2<f32>, ctrl: vec2<f32>, p2: vec2<
         if (t > 1.1)  { t = 1.1; }
     }
 
-    // clamp t to [0,1] for final point evaluation (but we keep original t value to test if it's near segment)
+    // clamp t to [0,1] for final point evaluation
     let t_clamped = clamp(t, 0.0, 1.0);
     let bt = a * t_clamped * t_clamped + b * t_clamped + p0;
     let dist = length(bt - px);
@@ -144,9 +144,6 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     let dist = dt.x;
     let t_closest = dt.y;
 
-    // If the closest point lies significantly outside this segment (tiny epsilon),
-    // don't consider this fragment (prevents MBR-overlap painting).
-    // allow a small epsilon to cover AA region around endpoints.
     let EPS_T = 0.02; // tweakable (0.02 = 2% of segment)
     if (t_closest < -EPS_T || t_closest > 1.0 + EPS_T) {
         discard;
@@ -155,7 +152,7 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     // Anti-aliased line alpha
     let line_alpha = 1.0 - smoothstep(LINE_THICKNESS - AA_SOFTNESS, LINE_THICKNESS + AA_SOFTNESS, dist);
 
-    // Arrow calculation (unchanged, computed from full segment endpoints)
+    // Arrow calculation
     let a = p0 - 2.0 * ctrl + p2;
     let b = 2.0 * (ctrl - p0);
     let tangent = 2.0 * a + b; // derivative at t=1
@@ -198,7 +195,7 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
         tip = p2 - dir * t_hit;
     }
 
-    // Arrow triangle test (unchanged)
+    // Arrow triangle test
     let base_center = tip - dir * ARROW_LENGTH_PX;
     let perp = vec2<f32>(-dir.y, dir.x);
     let halfw = ARROW_WIDTH_PX * 0.5;
