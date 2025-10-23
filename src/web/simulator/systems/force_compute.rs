@@ -13,6 +13,7 @@ use crate::web::{
                 SpringNeutralLength, SpringStiffness, WorldSize,
             },
         },
+        systems::position_compute::norm_pos_center,
     },
 };
 use glam::Vec2;
@@ -143,11 +144,7 @@ impl<'a> System<'a> for ComputeGravityForce {
         )
             .par_join()
             .for_each(|(entity, pos, mass, force, _, _)| {
-                // Normalize position to the center of wgpu's coordinate system
-                let norm_width = (world_size.width >> 1) as f32;
-                let norm_height = (world_size.height >> 1) as f32;
-                let norm_pos = Vec2::new(-pos.0.x + norm_width, -pos.0.y + norm_height);
-
+                let norm_pos = norm_pos_center(pos.0, [world_size.width, world_size.height]);
                 force.0 += norm_pos * mass.0 * gravity_force.0;
                 // info!(
                 //     "(CGF) [{0}] f: {1} | p: {2} | m: {3} | g: {4}",

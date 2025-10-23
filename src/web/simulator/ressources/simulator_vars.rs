@@ -58,5 +58,10 @@ pub struct CursorPosition(pub Vec2);
 
 /// The entity ID of the node where the cursor position
 /// is within the circumference of said node.
-#[derive(Default)]
-pub struct PointIntersection(pub u32);
+pub struct PointIntersection(pub i64);
+
+impl Default for PointIntersection {
+    fn default() -> Self {
+        Self(-1)
+    }
+}

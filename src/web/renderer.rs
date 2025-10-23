@@ -611,13 +611,11 @@ impl State {
 
     pub fn update(&mut self) {
         if !self.paused {
-            self.simulator.dispatcher.dispatch(&self.simulator.world);
-            self.simulator.world.maintain();
+            self.simulator.tick();
         }
 
         let positions = self.simulator.world.read_storage::<Position>();
         let entities = self.simulator.world.entities();
-
         for (i, (_, position)) in (&entities, &positions).join().enumerate() {
             self.positions[i] = [position.0.x, position.0.y];
         }
