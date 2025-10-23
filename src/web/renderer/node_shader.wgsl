@@ -9,8 +9,8 @@ struct VertIn {
 struct VertOut {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) v_uv: vec2<f32>, // 0..1 inside quad
-    @location(1) v_node_type: u32,
-    @location(2) v_shape: u32,
+    @interpolate(flat) @location(1) v_node_type: u32,
+    @interpolate(flat) @location(2) v_shape: u32,
     @location(3) v_shape_dimensions: vec2<f32>,
 };
 
@@ -18,7 +18,7 @@ struct VertOut {
 var<uniform> u_resolution: vec4<f32>; // xy = pixel resolution
 
 // per-instance radius fixed
-const NODE_RADIUS_PIX = 48.0; // pixels
+const NODE_RADIUS_PIX = 50.0; // pixels
 
 @vertex
 fn vs_node_main(

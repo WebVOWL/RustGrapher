@@ -69,13 +69,12 @@ impl NodeInstance {
     }
 }
 
-/// Create an instance vertex buffer containing node positions.
-pub fn create_node_instance_buffer(
+pub fn build_node_instances(
     device: &wgpu::Device,
     positions: &[[f32; 2]],
     node_types: &[NodeType],
     node_shapes: &[NodeShape],
-) -> wgpu::Buffer {
+) -> Vec<NodeInstance> {
     let mut node_instances: Vec<NodeInstance> = vec![];
     for (i, pos) in positions.iter().enumerate() {
         let (shape_type, shape_dim) = match node_shapes[i] {
@@ -89,6 +88,17 @@ pub fn create_node_instance_buffer(
             shape_dim,
         });
     }
+    node_instances
+}
+
+/// Create an instance vertex buffer containing node positions.
+pub fn create_node_instance_buffer(
+    device: &wgpu::Device,
+    positions: &[[f32; 2]],
+    node_types: &[NodeType],
+    node_shapes: &[NodeShape],
+) -> wgpu::Buffer {
+    let node_instances = build_node_instances(device, positions, node_types, node_shapes);
 
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("instance_node_buffer"),
@@ -126,13 +136,13 @@ impl EdgeInstance {
     }
 }
 
-pub fn create_edge_instance_buffer(
+pub fn build_edge_instances(
     device: &wgpu::Device,
     edges: &[[usize; 2]],
     center_positions: &[[f32; 2]],
     node_positions: &[[f32; 2]],
     node_shapes: &[NodeShape],
-) -> wgpu::Buffer {
+) -> Vec<EdgeInstance> {
     let mut edge_instances = Vec::with_capacity(edges.len());
 
     for (center_idx, &[start_idx, end_idx]) in edges.iter().enumerate() {
@@ -153,6 +163,18 @@ pub fn create_edge_instance_buffer(
             shape_dim,
         });
     }
+    edge_instances
+}
+
+pub fn create_edge_instance_buffer(
+    device: &wgpu::Device,
+    edges: &[[usize; 2]],
+    center_positions: &[[f32; 2]],
+    node_positions: &[[f32; 2]],
+    node_shapes: &[NodeShape],
+) -> wgpu::Buffer {
+    let edge_instances =
+        build_edge_instances(device, edges, center_positions, node_positions, node_shapes);
 
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("edge_instance_buffer"),

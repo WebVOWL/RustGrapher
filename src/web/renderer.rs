@@ -192,7 +192,7 @@ impl State {
             [650.0, 50.0],
             [850.0, 50.0],
             [1050.0, 50.0],
-            [1250.0, 50.0],
+            [1050.0, 250.0],
             [450.0, 250.0],
             [650.0, 250.0],
             [850.0, 250.0],
@@ -754,50 +754,37 @@ impl State {
 
         self.positions[1] = [self.positions[1][0], self.positions[1][1] + t];
 
-        let mut nodes: Vec<NodeInstance> = Vec::with_capacity(self.positions.len());
-        for (i, pos) in self.positions.iter().enumerate() {
-            let (shape_type, shape_dim) = match self.node_shapes[i] {
-                NodeShape::Circle { r } => (0, [r, 0.0]),
-                NodeShape::Rectangle { w, h } => (1, [w, h]),
-            };
-            nodes.push(NodeInstance {
-                position: *pos,
-                node_type: self.node_types[i] as u32,
-                shape_type,
-                shape_dim,
-            });
-        }
+        let x = ((self.frame_count as f32) * 0.025).sin() * 5.0;
+        let y = ((self.frame_count as f32) * 0.025).cos() * 5.0;
 
-        let mut edge_positions: Vec<EdgeInstance> = Vec::with_capacity(self.edges.len());
-        for (i, edge) in self.edges.iter().enumerate() {
-            let start = self.positions[edge[0]];
-            let end = self.positions[edge[1]];
-            let center = if i < self.edge_center_positions.len() {
-                self.edge_center_positions[i]
-            } else {
-                [(start[0] + end[0]) * 0.5, (start[1] + end[1]) * 0.5]
-            };
-            let (shape_type, shape_dim) = match self.node_shapes[i] {
-                NodeShape::Circle { r } => (0, [r, 0.0]),
-                NodeShape::Rectangle { w, h } => (1, [w, h]),
-            };
-            edge_positions.push(EdgeInstance {
-                start: start,
-                end: end,
-                center: center,
-                shape_type: shape_type,
-                shape_dim: shape_dim,
-            });
-        }
+        self.positions[8] = [self.positions[8][0] + x, self.positions[8][1] + y];
+
+        let node_instances = vertex_buffer::build_node_instances(
+            &self.device,
+            &self.positions,
+            &self.node_types,
+            &self.node_shapes,
+        );
+
+        let edge_instances = vertex_buffer::build_edge_instances(
+            &self.device,
+            &self.edges,
+            &self.edge_center_positions,
+            &self.positions,
+            &self.node_shapes,
+        );
 
         self.queue.write_buffer(
             &self.edge_instance_buffer,
             0,
-            bytemuck::cast_slice(&edge_positions),
+            bytemuck::cast_slice(&edge_instances),
         );
 
-        self.queue
-            .write_buffer(&self.node_instance_buffer, 0, bytemuck::cast_slice(&nodes));
+        self.queue.write_buffer(
+            &self.node_instance_buffer,
+            0,
+            bytemuck::cast_slice(&node_instances),
+        );
     }
 
     fn handle_key(&self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
