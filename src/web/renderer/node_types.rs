@@ -14,4 +14,12 @@ pub enum NodeType {
     RdfsClass,
     RdfsResource,
     Datatype,
+    ObjectProperty,
+    DatatypeProperty,
+    SubclassOf,
+    InverseProperty,
+    DisjointWith,
+    RdfProperty,
+    DeprecatedProperty,
+    ExternalProperty,
 }

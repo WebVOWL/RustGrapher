@@ -68,6 +68,7 @@ const LITERAL_COLOR = vec3<f32>(1.0, 0.8, 0.2);
 const BORDER_COLOR = vec3<f32>(0.0);
 const DEPRECATED_COLOR = vec3<f32>(0.6038);
 const SET_COLOR = vec3<f32>(0.4, 0.6, 0.8);
+const DATATYPE_PROPERTY_COLOR = vec3<f32>(0.6039, 0.7960, 0.4039);
 
 @fragment
 fn fs_node_main(in: VertOut) -> @location(0) vec4<f32> {
@@ -579,6 +580,38 @@ fn draw_datatype(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(col, alpha);
 }
 
+fn draw_property(v_uv: vec2<f32>, shape_dimensions: vec2<f32>, fill_color: vec3<f32>) -> vec4<f32> {
+    let rect_center = vec2<f32>(0.5, 0.5);
+    let rect_size = vec2(0.9, 0.25 * shape_dimensions.y);
+
+    let p = v_uv - rect_center;
+
+    let half_size = 0.5 * rect_size;
+
+    let inside_x = abs(p.x) <= half_size.x;
+    let inside_y = abs(p.y) <= half_size.y;
+
+    let inside_rect = inside_x && inside_y;
+    // mask selection
+    var fill_mask = 0.0;
+    if(inside_rect) {
+        fill_mask = 1.0;
+    }
+
+    // perimeter coordinate
+    let width = 2.0 * half_size.x;
+    let height = 2.0 * half_size.y;
+    let perim = 2.0 * (width + height);
+
+    // composite
+    var col = BACKGROUND_COLOR;
+    col = mix(col, fill_color, fill_mask);
+
+    let alpha = clamp(fill_mask, 0.0, 1.0);
+
+    return vec4<f32>(col, alpha);
+}
+
 fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
     switch node_type {
         case 0: {return draw_class(v_uv);}
@@ -595,6 +628,15 @@ fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>, shape_dimensions: vec2<f32
         case 11: {return draw_rdfs_class(v_uv);}
         case 12: {return draw_rdfs_resource(v_uv);}
         case 13: {return draw_datatype(v_uv, shape_dimensions);}
+        case 14: {return draw_property(v_uv, shape_dimensions, LIGHT_BLUE);}
+        case 15: {return draw_property(v_uv, shape_dimensions, DATATYPE_PROPERTY_COLOR);}
+        // Not implemented
+        // case 16: {return draw_subclass_of(v_uv, shape_dimensions);}
+        // case 17: {return draw_inverse_property(v_uv, shape_dimensions);}
+        // case 18: {return draw_disjoint_with(v_uv, shape_dimensions);}
+        // case 19: {return draw_rdf_property(v_uv, shape_dimensions);}
+        // case 20: {return draw_deprecated_property(v_uv, shape_dimensions);}
+        // case 21: {return draw_external_property(v_uv, shape_dimensions);}
         default: {return vec4<f32>(0.0);}
     }
 }

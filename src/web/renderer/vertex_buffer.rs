@@ -111,8 +111,8 @@ pub fn create_node_instance_buffer(
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct EdgeInstance {
     pub start: [f32; 2],
-    pub end: [f32; 2],
     pub center: [f32; 2],
+    pub end: [f32; 2],
     pub shape_type: u32,     // 0 = Circle, 1 = Rectangle
     pub shape_dim: [f32; 2], // [r, _] for Circle or [w, h] for Rectangle
 }
@@ -138,16 +138,15 @@ impl EdgeInstance {
 
 pub fn build_edge_instances(
     device: &wgpu::Device,
-    edges: &[[usize; 2]],
-    center_positions: &[[f32; 2]],
+    edges: &[[usize; 3]],
     node_positions: &[[f32; 2]],
     node_shapes: &[NodeShape],
 ) -> Vec<EdgeInstance> {
     let mut edge_instances = Vec::with_capacity(edges.len());
 
-    for (center_idx, &[start_idx, end_idx]) in edges.iter().enumerate() {
+    for &[start_idx, center_idx, end_idx] in edges {
         let start = node_positions[start_idx];
-        let center = center_positions[center_idx];
+        let center = node_positions[center_idx];
         let end = node_positions[end_idx];
 
         let (shape_type, shape_dim) = match node_shapes[end_idx] {
@@ -168,13 +167,11 @@ pub fn build_edge_instances(
 
 pub fn create_edge_instance_buffer(
     device: &wgpu::Device,
-    edges: &[[usize; 2]],
-    center_positions: &[[f32; 2]],
+    edges: &[[usize; 3]],
     node_positions: &[[f32; 2]],
     node_shapes: &[NodeShape],
 ) -> wgpu::Buffer {
-    let edge_instances =
-        build_edge_instances(device, edges, center_positions, node_positions, node_shapes);
+    let edge_instances = build_edge_instances(device, edges, node_positions, node_shapes);
 
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("edge_instance_buffer"),

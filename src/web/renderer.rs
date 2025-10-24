@@ -19,12 +19,9 @@ use winit::{
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-use vertex_buffer::{NodeInstance, VERTICES, Vertex};
+use vertex_buffer::{EdgeInstance, NodeInstance, VERTICES, Vertex};
 
-use crate::web::{
-    renderer::{node_shape::NodeShape, vertex_buffer::EdgeInstance},
-    simulator::Simulator,
-};
+use crate::web::{renderer::node_shape::NodeShape, simulator::Simulator};
 
 use crate::web::renderer::node_types::NodeType;
 
@@ -55,8 +52,7 @@ struct State {
     // Node and edge coordinates in pixels
     positions: Vec<[f32; 2]>,
     labels: Vec<String>,
-    edges: Vec<[usize; 2]>,
-    edge_center_positions: Vec<[f32; 2]>,
+    edges: Vec<[usize; 3]>,
     node_types: Vec<NodeType>,
     node_shapes: Vec<NodeShape>,
     frame_count: u64, // TODO: Remove after implementing simulator
@@ -197,8 +193,10 @@ impl State {
             [650.0, 250.0],
             [850.0, 250.0],
             [1050.0, 250.0],
-            [50.0, 500.0],
             [1250.0, 250.0],
+            [50.0, 500.0],
+            [1250.0, 150.0],
+            [1250.0, 350.0],
         ];
         let labels = vec![
             String::from("My class"),
@@ -214,8 +212,10 @@ impl State {
             String::new(),
             String::new(),
             String::new(),
-            String::from("Property"),
             String::from("Datatype"),
+            String::from("Property1"),
+            String::from("Property2"),
+            String::from("Property3"),
         ];
 
         let node_types = [
@@ -232,8 +232,10 @@ impl State {
             NodeType::DisjointUnion,
             NodeType::Intersection,
             NodeType::Union,
-            NodeType::Literal,
             NodeType::Datatype,
+            NodeType::ObjectProperty,
+            NodeType::DatatypeProperty,
+            NodeType::DatatypeProperty,
         ];
 
         let node_shapes = vec![
@@ -250,12 +252,15 @@ impl State {
             NodeShape::Circle { r: 1.0 },
             NodeShape::Circle { r: 1.0 },
             NodeShape::Circle { r: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
             NodeShape::Rectangle { w: 1.5, h: 0.5 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
         ];
 
-        // Combine positions and types into NodeInstance entries
+        let edges = [[0, 14, 1], [13, 15, 8], [8, 16, 13]];
 
+        // Combine positions and types into NodeInstance entries
         let node_instance_buffer = vertex_buffer::create_node_instance_buffer(
             &device,
             &positions,
@@ -336,16 +341,8 @@ impl State {
 
         let num_vertices = VERTICES.len() as u32;
 
-        // TODO: remove test edges after adding simulator
-        let edges = [[0, 1], [14, 8]];
-        let edge_center_positions = [[50.0, 500.0], [1300.0, 150.0]];
-        let edge_instance_buffer = vertex_buffer::create_edge_instance_buffer(
-            &device,
-            &edges,
-            &edge_center_positions,
-            &positions,
-            &node_shapes,
-        );
+        let edge_instance_buffer =
+            vertex_buffer::create_edge_instance_buffer(&device, &edges, &positions, &node_shapes);
         let num_edge_instances = edges.len() as u32;
 
         let edge_shader =
@@ -434,7 +431,6 @@ impl State {
             positions: positions.to_vec(),
             labels,
             edges: edges.to_vec(),
-            edge_center_positions: edge_center_positions.to_vec(),
             node_types: node_types.to_vec(),
             node_shapes,
             frame_count: 0,
@@ -769,7 +765,6 @@ impl State {
         let edge_instances = vertex_buffer::build_edge_instances(
             &self.device,
             &self.edges,
-            &self.edge_center_positions,
             &self.positions,
             &self.node_shapes,
         );

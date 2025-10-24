@@ -1,8 +1,8 @@
 struct VertIn {
     @location(0) quad_pos: vec2<f32>,         // [-1..1]
     @location(1) start: vec2<f32>,            // start of edge (in px)
-    @location(2) end: vec2<f32>,              // end of edge (in px)
-    @location(3) center: vec2<f32>,           // point ON curve at t=0.5 (in px)
+    @location(2) center: vec2<f32>,           // point ON curve at t=0.5 (in px)
+    @location(3) end: vec2<f32>,              // end of edge (in px)
     @location(4) end_shape: u32,              // The shape of the node pointed to, 0: Circle, 1: Rectangle
     @location(5) shape_dimensions: vec2<f32>, // The radius of a circle or the width and height of a rectangle
 };
@@ -22,8 +22,8 @@ struct VertOut {
 @group(0) @binding(0)
 var<uniform> u_resolution: vec4<f32>; // xy = screen size
 
-const LINE_THICKNESS = 1.75;
-const AA_SOFTNESS    = 1.5;
+const LINE_THICKNESS = 1.0;
+const AA_SOFTNESS    = 1.0;
 
 // Evaluate Bézier point
 fn bezier(p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, t: f32) -> vec2<f32> {
@@ -93,13 +93,13 @@ const NODE_RADIUS_PIX = 50.0;
 fn dist_and_t_to_bezier(px: vec2<f32>, p0: vec2<f32>, ctrl: vec2<f32>, p2: vec2<f32>) -> vec2<f32> {
     let a = p0 - 2.0 * ctrl + p2;
     let b = 2.0 * (ctrl - p0);
-    
+
     // initial sampling to get a good starting t
     var best_d2 = 1e12;
     var best_t = 0.0;
 
-    for (var i = 0u; i <= 32u; i = i + 1u) {
-        let t = f32(i) / 32.0;
+    for (var i = 0u; i <= 64u; i = i + 1u) {
+        let t = f32(i) / 64.0;
         let bt = a * t * t + b * t + p0;
         let d2 = dot(bt - px, bt - px);
         if (d2 < best_d2) {
@@ -120,7 +120,7 @@ fn dist_and_t_to_bezier(px: vec2<f32>, p0: vec2<f32>, ctrl: vec2<f32>, p2: vec2<
         let dt = f / df;
         if (abs(dt) < 1e-5) { break; }
         t = t - dt;
-    
+
         if (t < -0.1) { t = -0.1; }
         if (t > 1.1)  { t = 1.1; }
     }
@@ -130,6 +130,11 @@ fn dist_and_t_to_bezier(px: vec2<f32>, p0: vec2<f32>, ctrl: vec2<f32>, p2: vec2<
     let bt = a * t_clamped * t_clamped + b * t_clamped + p0;
     let dist = length(bt - px);
     return vec2<f32>(dist, t_clamped);
+}
+
+// Simple point-in-triangle check
+fn tri_area(a: vec2<f32>, b: vec2<f32>, c: vec2<f32>) -> f32 {
+    return abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) * 0.5;
 }
 
 @fragment
@@ -144,7 +149,7 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     let dist = dt.x;
     let t_closest = dt.y;
 
-    let EPS_T = 0.02; // tweakable (0.02 = 2% of segment)
+    let EPS_T = 0.02;
     if (t_closest < -EPS_T || t_closest > 1.0 + EPS_T) {
         discard;
     }
@@ -206,7 +211,7 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     let area_sub = tri_area(px, left, right) + tri_area(tip, px, right) + tri_area(tip, left, px);
     let area_diff = abs(area_sub - area_total);
 
-    var arrow_alpha = 0.0;
+    var arrow_alpha = 1.0;
     if (area_total > 1e-5) {
         let normalized_diff = area_diff / area_total;
         arrow_alpha = 1.0 - smoothstep(0.0, 0.06, normalized_diff);
@@ -215,15 +220,5 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     let color = vec3<f32>(0.0);
     let final_alpha = max(line_alpha, arrow_alpha);
 
-    if (final_alpha < 0.01) {
-        discard;
-    }
-
     return vec4<f32>(color, final_alpha);
-}
-
-
-// Simple point-in-triangle check
-fn tri_area(a: vec2<f32>, b: vec2<f32>, c: vec2<f32>) -> f32 {
-    return abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) * 0.5;
 }
