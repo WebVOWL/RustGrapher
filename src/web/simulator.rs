@@ -1,7 +1,6 @@
 pub mod components;
 pub mod ressources;
 mod systems;
-
 use crate::web::{
     quadtree::{BoundingBox2D, QuadTree},
     simulator::{
@@ -22,7 +21,7 @@ use crate::web::{
             force_compute::{
                 ApplyNodeForce, ComputeEdgeForces, ComputeGravityForce, ComputeNodeForce,
             },
-            position_compute::{DistSystemData, dist},
+            position_compute::{DistanceSystemData, distance},
             position_update::{
                 DragEndSystemData, DragStartSystemData, DraggingSystemData, UpdateNodePosition,
                 sys_drag_end, sys_drag_start, sys_dragging,
@@ -41,83 +40,6 @@ use specs::{
 };
 use std::{collections::HashMap, iter::Enumerate};
 use winit::dpi::PhysicalSize;
-
-#[derive(Default)]
-struct EventManager {
-    pub reader: Option<ReaderId<SimulatorEvent>>,
-}
-
-impl<'a> System<'a> for EventManager {
-    type SystemData = (
-        Read<'a, EventChannel<SimulatorEvent>>,
-        Write<'a, RepelForce>,
-        Write<'a, SpringStiffness>,
-        Write<'a, SpringNeutralLength>,
-        Write<'a, GravityForce>,
-        Write<'a, DeltaTime>,
-        Write<'a, Damping>,
-        Write<'a, QuadTreeTheta>,
-        Write<'a, FreezeThreshold>,
-        Write<'a, WorldSize>,
-        Write<'a, CursorPosition>,
-    );
-
-    fn run(
-        &mut self,
-        (
-            events,
-            mut repel_force,
-            mut spring_stiffness,
-            mut spring_length,
-            mut gravity_force,
-            mut deltatime,
-            mut damping,
-            mut quadtree_theta,
-            mut freeze_threshold,
-            mut world_size,
-            mut cursor_position,
-        ): Self::SystemData,
-    ) {
-        for event in events.read(&mut self.reader.as_mut().unwrap()) {
-            match event {
-                SimulatorEvent::RepelForceUpdated(value) => repel_force.0 = *value,
-                SimulatorEvent::SpringStiffnessUpdated(value) => spring_stiffness.0 = *value,
-                SimulatorEvent::SpringNeutralLengthUpdated(value) => spring_length.0 = *value,
-                SimulatorEvent::GravityForceUpdated(value) => gravity_force.0 = *value,
-                SimulatorEvent::DeltaTimeUpdated(value) => deltatime.0 = *value,
-                SimulatorEvent::DampingUpdated(value) => damping.0 = *value,
-                SimulatorEvent::SimulationAccuracyUpdated(value) => quadtree_theta.0 = *value,
-                SimulatorEvent::FreezeThresholdUpdated(value) => freeze_threshold.0 = *value,
-                SimulatorEvent::WindowResized { width, height } => {
-                    world_size.width = *width;
-                    world_size.height = *height
-                }
-                SimulatorEvent::DragStart(cursor_pos) => {
-                    cursor_position.0 = *cursor_pos;
-                    // world.exec(point_intersect);
-
-                    // world.exec(sys_drag_start);
-                }
-                SimulatorEvent::DragEnd => {
-                    // world.exec(sys_drag_end);
-                }
-                SimulatorEvent::Dragged(cursor_pos) => {
-                    cursor_position.0 = *cursor_pos;
-                    // world.exec(sys_dragging);
-                }
-            }
-        }
-    }
-
-    fn setup(&mut self, world: &mut World) {
-        Self::SystemData::setup(world);
-        self.reader = Some(
-            world
-                .fetch_mut::<EventChannel<SimulatorEvent>>()
-                .register_reader(),
-        );
-    }
-}
 
 struct QuadTreeConstructor;
 
@@ -179,12 +101,8 @@ impl<'a, 'b> Simulator<'a, 'b> {
     }
 
     pub fn tick(&mut self) {
-        {
-            // let event_data: EventSystemData = self.world.system_data();
-            Self::handle_simulator_event(&self.world, &self.event_channel, &mut self.reader_id); //, event_data);
-        }
-
         self.dispatcher.dispatch(&self.world);
+        Self::handle_simulator_event(&self.world, &self.event_channel, &mut self.reader_id);
         self.world.maintain();
     }
 
