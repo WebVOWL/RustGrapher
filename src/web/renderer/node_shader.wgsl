@@ -612,6 +612,71 @@ fn draw_property(v_uv: vec2<f32>, shape_dimensions: vec2<f32>, fill_color: vec3<
     return vec4<f32>(col, alpha);
 }
 
+fn draw_disjoint_with(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
+    let rect_center = vec2<f32>(0.5, 0.5);
+    let rect_size = vec2(0.9, 0.25 * shape_dimensions.y);
+
+    let p = v_uv - rect_center;
+
+    let half_size = 0.5 * rect_size;
+
+    // perimeter coordinate
+    let width = 2.0 * half_size.x;
+    let height = 2.0 * half_size.y;
+    let perim = 2.0 * (width + height);
+
+    // positions for two inner circles
+    let circle_r = 0.15;
+    let offset = 0.19;
+    let c1 = vec2<f32>(0.5 - offset, 0.5);
+    let c2 = vec2<f32>(0.5 + offset, 0.5);
+
+    let d1 = distance(v_uv, c1);
+    let d2 = distance(v_uv, c2);
+
+    // Inner circle fill and border masks
+    let inner_fill_1 = 1.0 - smoothstep(circle_r, circle_r + EDGE_SOFTNESS, d1);
+    let inner_fill_2 = 1.0 - smoothstep(circle_r, circle_r + EDGE_SOFTNESS, d2);
+
+    // borders
+    let border_outer_r = circle_r + BORDER_THICKNESS * 0.4;
+    let border_inner_r = circle_r - BORDER_THICKNESS * 0.4;
+
+    let border_1 =
+        smoothstep(border_inner_r, border_inner_r + EDGE_SOFTNESS, d1) *
+        (1.0 - smoothstep(border_outer_r, border_outer_r + EDGE_SOFTNESS, d1));
+    let border_2 =
+        smoothstep(border_inner_r, border_inner_r + EDGE_SOFTNESS, d2) *
+        (1.0 - smoothstep(border_outer_r, border_outer_r + EDGE_SOFTNESS, d2));
+
+    let inner_fill_mask = clamp(inner_fill_1 + inner_fill_2, 0.0, 1.0);
+    let inner_border_mask = clamp(border_1 + border_2, 0.0, 1.0);
+
+    let inside_x = abs(p.x) <= half_size.x;
+    let inside_y = abs(p.y) <= half_size.y;
+
+    let inside_rect = inside_x && inside_y;
+    // mask selection
+    var outer_fill_mask = 0.0;
+    if(inside_rect) {
+        outer_fill_mask = 1.0;
+    }
+
+    // colors
+    let inner_fill_color = SET_COLOR;
+    let outer_fill_color = LIGHT_BLUE;
+
+    // composite
+    var col = BACKGROUND_COLOR;
+    col = mix(col, outer_fill_color, outer_fill_mask);
+    col = mix(col, inner_fill_color, inner_fill_mask);
+    col = mix(col, BORDER_COLOR, inner_border_mask);
+
+    let alpha = clamp(outer_fill_mask + inner_fill_mask + inner_border_mask, 0.0, 1.0);
+
+    return vec4<f32>(col, alpha);
+}
+
 fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
     switch node_type {
         case 0: {return draw_class(v_uv);}
@@ -631,12 +696,11 @@ fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>, shape_dimensions: vec2<f32
         case 14: {return draw_property(v_uv, shape_dimensions, LIGHT_BLUE);}
         case 15: {return draw_property(v_uv, shape_dimensions, DATATYPE_PROPERTY_COLOR);}
         case 16: {return draw_property(v_uv, shape_dimensions, vec3<f32>(1.0));}
-        // Not implemented
         // case 17: {return draw_inverse_property(v_uv, shape_dimensions);}
-        // case 18: {return draw_disjoint_with(v_uv, shape_dimensions);}
-        // case 19: {return draw_rdf_property(v_uv, shape_dimensions);}
-        // case 20: {return draw_deprecated_property(v_uv, shape_dimensions);}
-        // case 21: {return draw_external_property(v_uv, shape_dimensions);}
+        case 18: {return draw_disjoint_with(v_uv, shape_dimensions);}
+        case 19: {return draw_property(v_uv, shape_dimensions, RDFS_COLOR);}
+        case 20: {return draw_property(v_uv, shape_dimensions, DEPRECATED_COLOR);}
+        case 21: {return draw_property(v_uv, shape_dimensions, DARK_BLUE);}
         default: {return vec4<f32>(0.0);}
     }
 }

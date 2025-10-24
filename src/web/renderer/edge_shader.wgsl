@@ -160,7 +160,7 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     // Anti-aliased line alpha
     var line_alpha = 1.0 - smoothstep(LINE_THICKNESS - AA_SOFTNESS, LINE_THICKNESS + AA_SOFTNESS, dist);
 
-    if (in.v_line_type == 1) {
+    if (in.v_line_type == 1 || in.v_line_type == 2) {
         // Increase number of dots based on length
         let pattern_repeats = (distance(p0, ctrl) + distance(ctrl, p2)) / 10.0;
         let dot_fraction    = 0.6;
@@ -216,6 +216,11 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
         }
 
         tip = p2 - dir * t_hit;
+    }
+
+    // No arrow for disjoint edges
+    if(in.v_line_type == 2) {
+        return vec4<f32>(vec3<f32>(0.0), line_alpha);
     }
 
     // Arrow triangle

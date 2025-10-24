@@ -148,18 +148,23 @@ pub fn build_edge_instances(
     let mut edge_instances = Vec::with_capacity(edges.len());
 
     for &[start_idx, center_idx, end_idx] in edges {
-        let start = node_positions[start_idx];
+        let mut start = node_positions[start_idx];
         let center = node_positions[center_idx];
-        let end = node_positions[end_idx];
+        let mut end = node_positions[end_idx];
         let line_type = match node_types[center_idx] {
-            NodeType::SubclassOf => 1, // Dotted line
-            _ => 0,                    // Solid line
+            NodeType::SubclassOf => 1,   // Dotted line with white arrow
+            NodeType::DisjointWith => 2, // Dotted line with no arrow
+            _ => 0,                      // Solid line with black arrow
         };
 
         let (shape_type, shape_dim) = match node_shapes[end_idx] {
             NodeShape::Circle { r } => (0, [r, 0.0]),
             NodeShape::Rectangle { w, h } => (1, [w, h]),
         };
+        // TODO: handle symmetric properties
+        // if start_idx == end_idx {
+        //
+        // }
 
         edge_instances.push(EdgeInstance {
             start,

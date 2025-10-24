@@ -192,12 +192,17 @@ impl State {
             [450.0, 250.0],
             [650.0, 250.0],
             [850.0, 250.0],
-            [1050.0, 250.0],
+            [850.0, 450.0],
             [1250.0, 250.0],
             [50.0, 500.0],
             [1250.0, 150.0],
             [1250.0, 350.0],
             [150.0, 150.0],
+            [550.0, 250.0],
+            [350.0, 50.0],
+            [750.0, 250.0],
+            [850.0, 350.0],
+            [750.0, 450.0],
         ];
         let labels = vec![
             String::from("My class"),
@@ -218,6 +223,11 @@ impl State {
             String::from("Property2"),
             String::from("Property3"),
             String::new(),
+            String::new(),
+            String::from("is a"),
+            String::from("Deprecated"),
+            String::from("External"),
+            String::from("Symmetric"),
         ];
 
         let node_types = [
@@ -239,6 +249,11 @@ impl State {
             NodeType::DatatypeProperty,
             NodeType::DatatypeProperty,
             NodeType::SubclassOf,
+            NodeType::DisjointWith,
+            NodeType::RdfProperty,
+            NodeType::DeprecatedProperty,
+            NodeType::ExternalProperty,
+            NodeType::ObjectProperty,
         ];
 
         let node_shapes = vec![
@@ -260,9 +275,24 @@ impl State {
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Rectangle { w: 0.6, h: 2.0 },
+            NodeShape::Rectangle { w: 0.6, h: 1.5 },
+            NodeShape::Rectangle { w: 0.8, h: 1.0 },
+            NodeShape::Rectangle { w: 0.8, h: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
         ];
 
-        let edges = [[0, 14, 1], [13, 15, 8], [8, 16, 13], [0, 17, 3]];
+        let edges = [
+            [0, 14, 1],
+            [13, 15, 8],
+            [8, 16, 13],
+            [0, 17, 3],
+            [9, 18, 10],
+            [1, 19, 2],
+            [10, 20, 11],
+            [11, 21, 12],
+            [12, 22, 12],
+        ];
 
         // Combine positions and types into NodeInstance entries
         let node_instance_buffer = vertex_buffer::create_node_instance_buffer(
@@ -506,6 +536,7 @@ impl State {
             // TODO: update if we implement dynamic node size
             let label_width = 90.0 * scale;
             let label_height = match self.node_types[i] {
+                NodeType::DisjointWith => 62.0 * scale,
                 NodeType::ExternalClass | NodeType::DeprecatedClass | NodeType::EquivalentClass => {
                     48.0 * scale
                 }
@@ -549,6 +580,10 @@ impl State {
                 NodeType::DeprecatedClass => vec![
                     (label.as_str(), attrs.clone()),
                     ("\n(deprecated)", attrs.clone().metrics(node_type_metrics)),
+                ],
+                NodeType::DisjointWith => vec![
+                    (label.as_str(), attrs.clone()),
+                    ("\n\n(disjoint)", attrs.clone().metrics(node_type_metrics)),
                 ],
                 NodeType::Thing => vec![("Thing", attrs.clone())],
                 NodeType::Complement => vec![("¬", attrs.clone())],
@@ -759,6 +794,7 @@ impl State {
         let t = ((self.frame_count as f32) * 0.05).sin();
 
         self.positions[1] = [self.positions[1][0], self.positions[1][1] + t];
+        self.positions[19] = [self.positions[19][0], self.positions[19][1] + t / 2.0];
 
         let x = ((self.frame_count as f32) * 0.025).sin() * 5.0;
         let y = ((self.frame_count as f32) * 0.025).cos() * 5.0;
@@ -769,9 +805,15 @@ impl State {
             self.positions[3][0] + x / 2.0,
             self.positions[3][1] + x / 2.0,
         ];
+
         self.positions[17] = [
             self.positions[17][0] + x / 4.0,
             self.positions[17][1] + x / 4.0,
+        ];
+
+        self.positions[22] = [
+            self.positions[22][0] + x / 2.0,
+            self.positions[22][1] + y / 2.0,
         ];
 
         let node_instances = vertex_buffer::build_node_instances(
