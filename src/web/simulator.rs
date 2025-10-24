@@ -229,8 +229,8 @@ impl<'a, 'b> Simulator<'a, 'b> {
                         cursor_position.0 = *cursor_pos;
                     }
                     {
-                        let point_data: DistSystemData = world.system_data();
-                        dist(point_data);
+                        let point_data: DistanceSystemData = world.system_data();
+                        distance(point_data);
                     }
                     {
                         let drag_data: DragStartSystemData = world.system_data();

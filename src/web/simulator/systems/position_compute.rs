@@ -71,7 +71,7 @@ pub fn norm_pos_center(position: Vec2, boundary: [u32; 2]) -> Vec2 {
 }
 
 #[derive(SystemData)]
-pub struct DistSystemData<'a> {
+pub struct DistanceSystemData<'a> {
     entities: Entities<'a>,
     positions: ReadStorage<'a, Position>,
     cursor_position: Read<'a, CursorPosition>,
@@ -80,7 +80,7 @@ pub struct DistSystemData<'a> {
 }
 
 /// TODO: Implement using quadtree to improve performance
-pub fn dist(mut data: DistSystemData) {
+pub fn distance(mut data: DistanceSystemData) {
     for (entity, circle) in (&*data.entities, &data.positions).join() {
         const NODE_RADIUS: f32 = 48.0;
 
