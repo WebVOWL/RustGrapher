@@ -245,6 +245,7 @@ impl<'a, 'b> Simulator<'a, 'b> {
                     {
                         let mut cursor_position = world.fetch_mut::<CursorPosition>();
                         cursor_position.0 = *cursor_pos;
+                        info!("(EM) CP: {0}", cursor_pos)
                     }
                     {
                         let dragging_data: DraggingSystemData = world.system_data();
