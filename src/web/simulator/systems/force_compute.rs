@@ -32,9 +32,6 @@ pub struct ComputeNodeForce;
 
 impl ComputeNodeForce {
     /// Computes the repel force between two nodes.
-    ///
-    /// Usage in force calculations is as follows: Number 1 is the actual node,
-    /// number 2 is the "fake", approximate node.
     fn repel_force(pos1: Vec2, pos2: Vec2, mass1: f32, mass2: f32, repel_force: f32) -> Vec2 {
         let dir_vec = pos2 - pos1;
         let length_sqr = dir_vec.length_squared();
@@ -92,8 +89,9 @@ impl<'a> System<'a> for ComputeNodeForce {
             .for_each(|(entity, pos, mass, node_forces, _, _)| {
                 let node_approximations = quadtree.stack(&pos.0, theta.0);
 
+                node_forces.0 = Vec2::ZERO;
                 for node_approximation in node_approximations {
-                    node_forces.0 = Self::repel_force(
+                    node_forces.0 += Self::repel_force(
                         pos.0,
                         node_approximation.position(),
                         mass.0,
@@ -147,12 +145,14 @@ impl<'a> System<'a> for ComputeGravityForce {
                 let norm_pos = norm_pos_center(pos.0, [world_size.width, world_size.height]);
                 force.0 += norm_pos * mass.0 * gravity_force.0;
                 // info!(
-                //     "(CGF) [{0}] f: {1} | p: {2} | m: {3} | g: {4}",
+                //     "(CGF) [{0}] f: {1} | p: {2} | m: {3} | g: {4} | np: {5}",
                 //     entity.id(),
                 //     force.0,
                 //     pos.0,
                 //     mass.0,
-                //     gravity_force.0
+                //     gravity_force.0,
+                //     // dist_to_center,
+                //     norm_pos
                 // );
             });
     }
