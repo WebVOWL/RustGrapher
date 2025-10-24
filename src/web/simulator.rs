@@ -494,7 +494,7 @@ impl Default for SimulatorBuilder {
     /// Get a Instance of `SimulatorBuilder` with default values
     fn default() -> Self {
         Self {
-            repel_force: 200.0,
+            repel_force: 10e7, // Do not make this value greater or equal 10e8
             spring_stiffness: 100.0,
             spring_neutral_length: 200.0,
             gravity_force: 20.0,
