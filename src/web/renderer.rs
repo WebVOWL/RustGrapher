@@ -252,8 +252,11 @@ impl State {
         let num_vertices = VERTICES.len() as u32;
 
         // TODO: remove test edges after adding simulator
-        let edges = [[0, 1]];
+        let edges: [[usize; 2]; 1] = [[0, 0]]; //[[0, 1], [0, 2]];
         let mut edge_positions: Vec<[[f32; 2]; 2]> = vec![];
+
+        // FIXME If we have 0 edges, wgpu explodes with "buffer slices can not be empty"
+
         for edge in edges {
             edge_positions.push([positions[edge[0]], positions[edge[1]]]);
         }
@@ -294,12 +297,15 @@ impl State {
             cache: None,
         });
 
-        let sim_nodes = vec![
-            Vec2::new(positions[0][0], positions[0][1]),
-            Vec2::new(positions[1][0], positions[1][1]),
-            Vec2::new(positions[2][0], positions[2][1]),
-        ];
-        let sim_edges = vec![[0.0 as u32, 1.0 as u32]];
+        let mut sim_nodes = Vec::with_capacity(positions.len());
+        for pos in positions {
+            sim_nodes.push(Vec2::new(pos[0], pos[1]));
+        }
+
+        let mut sim_edges = Vec::with_capacity(edges.len());
+        for edge in edges {
+            sim_edges.push([edge[0].try_into().unwrap(), edge[1].try_into().unwrap()]);
+        }
         let mut simulator = Simulator::builder().build(sim_nodes, sim_edges);
 
         // Glyphon: do not create heavy glyphon resources unless we have a non-zero surface.
