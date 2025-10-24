@@ -82,8 +82,6 @@ type EventSystemData<'a> = (
     Write<'a, Damping>,
     Write<'a, QuadTreeTheta>,
     Write<'a, FreezeThreshold>,
-    // Write<'a, WorldSize>,
-    // Write<'a, CursorPosition>,
 );
 
 //#[warn(dead_code = false)]
@@ -110,7 +108,6 @@ impl<'a, 'b> Simulator<'a, 'b> {
         world: &World,
         event_channel: &EventChannel<SimulatorEvent>,
         reader_id: &mut ReaderId<SimulatorEvent>,
-        // : EventSystemData,
     ) {
         let event_data: EventSystemData = world.system_data();
         let (
@@ -122,8 +119,6 @@ impl<'a, 'b> Simulator<'a, 'b> {
             mut damping,
             mut quadtree_theta,
             mut freeze_threshold,
-            // mut world_size,
-            // mut cursor_position,
         ) = event_data;
 
         for event in event_channel.read(reader_id) {
@@ -173,30 +168,6 @@ impl<'a, 'b> Simulator<'a, 'b> {
             }
         }
     }
-
-    // /// A node is being dragged.
-    // pub fn drag_start(&mut self, cursor_pos: Vec2) {
-    //     {
-    //         let mut cursor_position = self.world.fetch_mut::<CursorPosition>();
-    //         cursor_position.0 = cursor_pos;
-    //     }
-    //     self.world.exec(point_intersect);
-    //     self.world.exec(sys_drag_start);
-    // }
-
-    // /// A node is no longer being dragged.
-    // pub fn drag_end(&mut self) {
-    //     self.world.exec(sys_drag_end)
-    // }
-
-    // /// The position of the dragged node has changed.
-    // pub fn dragging(&mut self, cursor_pos: Vec2) {
-    //     {
-    //         let mut cursor_position = self.world.fetch_mut::<CursorPosition>();
-    //         cursor_position.0 = cursor_pos;
-    //     }
-    //     self.world.exec(sys_dragging);
-    // }
 
     pub fn send_event(&mut self, event: SimulatorEvent) {
         self.event_channel.single_write(event);
@@ -313,7 +284,6 @@ impl SimulatorBuilder {
     pub fn build<'a, 'b>(self, nodes: Vec<Vec2>, edges: Vec<[u32; 2]>) -> Simulator<'a, 'b> {
         let mut world = World::new();
         let mut dispatcher = DispatcherBuilder::new()
-            // .with(EventManager::default(), "event_manager", &[])
             .with(QuadTreeConstructor, "quadtree_constructor", &[])
             .with(
                 ComputeNodeForce,
