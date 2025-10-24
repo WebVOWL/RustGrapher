@@ -630,8 +630,8 @@ fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>, shape_dimensions: vec2<f32
         case 13: {return draw_datatype(v_uv, shape_dimensions);}
         case 14: {return draw_property(v_uv, shape_dimensions, LIGHT_BLUE);}
         case 15: {return draw_property(v_uv, shape_dimensions, DATATYPE_PROPERTY_COLOR);}
+        case 16: {return draw_property(v_uv, shape_dimensions, vec3<f32>(1.0));}
         // Not implemented
-        // case 16: {return draw_subclass_of(v_uv, shape_dimensions);}
         // case 17: {return draw_inverse_property(v_uv, shape_dimensions);}
         // case 18: {return draw_disjoint_with(v_uv, shape_dimensions);}
         // case 19: {return draw_rdf_property(v_uv, shape_dimensions);}

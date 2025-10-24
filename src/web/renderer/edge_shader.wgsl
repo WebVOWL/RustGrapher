@@ -5,6 +5,7 @@ struct VertIn {
     @location(3) end: vec2<f32>,              // end of edge (in px)
     @location(4) end_shape: u32,              // The shape of the node pointed to, 0: Circle, 1: Rectangle
     @location(5) shape_dimensions: vec2<f32>, // The radius of a circle or the width and height of a rectangle
+    @location(6) line_type: u32,
 };
 
 struct VertOut {
@@ -17,6 +18,7 @@ struct VertOut {
     @interpolate(flat) @location(5) v_mbr_max: vec2<f32>,
     @interpolate(flat) @location(6) v_end_shape: u32,
     @location(7) v_shape_dimensions: vec2<f32>,
+    @interpolate(flat) @location(8) v_line_type: u32,
 };
 
 @group(0) @binding(0)
@@ -79,6 +81,7 @@ fn vs_edge_main(in: VertIn) -> VertOut {
     out.v_mbr_max = max_p;
     out.v_end_shape = in.end_shape;
     out.v_shape_dimensions = in.shape_dimensions;
+    out.v_line_type = in.line_type;
 
     return out;
 }
@@ -86,7 +89,7 @@ fn vs_edge_main(in: VertIn) -> VertOut {
 // arrow constants (pixels)
 const ARROW_LENGTH_PX = 15.0;
 const ARROW_WIDTH_PX  = 15.0;
-const ARROW_AA_PX     = 2.0; // anti-alias softness in pixels
+const ARROW_AA     = 0.1;
 const NODE_RADIUS_PIX = 50.0;
 
 // Distance from point to quadratic bezier curve
@@ -155,7 +158,22 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     }
 
     // Anti-aliased line alpha
-    let line_alpha = 1.0 - smoothstep(LINE_THICKNESS - AA_SOFTNESS, LINE_THICKNESS + AA_SOFTNESS, dist);
+    var line_alpha = 1.0 - smoothstep(LINE_THICKNESS - AA_SOFTNESS, LINE_THICKNESS + AA_SOFTNESS, dist);
+
+    if (in.v_line_type == 1) {
+        // Increase number of dots based on length
+        let pattern_repeats = (distance(p0, ctrl) + distance(ctrl, p2)) / 10.0;
+        let dot_fraction    = 0.6;
+
+        let pattern_phase = fract(t_closest * pattern_repeats);
+
+        // Create a smooth on/off mask
+        let fade = 0.05;  // softness of dot edges
+        let dot_mask = smoothstep(0.0, fade, pattern_phase)
+                    * (1.0 - smoothstep(dot_fraction, dot_fraction + fade, pattern_phase));
+
+        line_alpha *= dot_mask;
+    }
 
     // Arrow calculation
     let a = p0 - 2.0 * ctrl + p2;
@@ -200,7 +218,7 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
         tip = p2 - dir * t_hit;
     }
 
-    // Arrow triangle test
+    // Arrow triangle
     let base_center = tip - dir * ARROW_LENGTH_PX;
     let perp = vec2<f32>(-dir.y, dir.x);
     let halfw = ARROW_WIDTH_PX * 0.5;
@@ -214,11 +232,41 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     var arrow_alpha = 1.0;
     if (area_total > 1e-5) {
         let normalized_diff = area_diff / area_total;
-        arrow_alpha = 1.0 - smoothstep(0.0, 0.06, normalized_diff);
+        arrow_alpha = 1.0 - smoothstep(0.0, ARROW_AA, normalized_diff);
     }
 
-    let color = vec3<f32>(0.0);
-    let final_alpha = max(line_alpha, arrow_alpha);
+    var color = vec3<f32>(0.0);
 
+    // Default arrow fill (black)
+    var arrow_color = vec3<f32>(0.0);
+
+    // Compute if inside arrow
+    let inside_arrow = arrow_alpha > 0.0;
+
+    // If line_type == 1 -> make arrow white with black border
+    if (in.v_line_type == 1u && inside_arrow) {
+        // Compute barycentric coordinates to find edge distance
+        let w0 = tri_area(px, left, right) / area_total;
+        let w1 = tri_area(px, right, tip) / area_total;
+        let w2 = tri_area(px, tip, left) / area_total;
+
+        // Distance to nearest edge
+        let edge_dist = min(min(w0, w1), w2);
+
+        // edge_thickness
+        let edge_thickness = 2.0;
+
+        // Soft transition between black border and white fill
+        let border_smooth = smoothstep(0.0, edge_thickness / ARROW_WIDTH_PX, edge_dist);
+        arrow_color = mix(vec3<f32>(0.0), vec3<f32>(1.0), border_smooth);
+    }
+
+    // Blend between arrow and line colors
+    if (inside_arrow) {
+        color = mix(color, arrow_color, arrow_alpha);
+    }
+
+    // Final composited alpha
+    let final_alpha = max(line_alpha, arrow_alpha);
     return vec4<f32>(color, final_alpha);
 }

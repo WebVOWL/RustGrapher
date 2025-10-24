@@ -115,15 +115,17 @@ pub struct EdgeInstance {
     pub end: [f32; 2],
     pub shape_type: u32,     // 0 = Circle, 1 = Rectangle
     pub shape_dim: [f32; 2], // [r, _] for Circle or [w, h] for Rectangle
+    pub line_type: u32,
 }
 
 impl EdgeInstance {
-    const ATTRIBS: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
+    const ATTRIBS: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
         1 => Float32x2,
         2 => Float32x2,
         3 => Float32x2,
         4 => Uint32,
         5 => Float32x2,
+        6 => Uint32,
     ];
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
@@ -141,6 +143,7 @@ pub fn build_edge_instances(
     edges: &[[usize; 3]],
     node_positions: &[[f32; 2]],
     node_shapes: &[NodeShape],
+    node_types: &[NodeType],
 ) -> Vec<EdgeInstance> {
     let mut edge_instances = Vec::with_capacity(edges.len());
 
@@ -148,6 +151,10 @@ pub fn build_edge_instances(
         let start = node_positions[start_idx];
         let center = node_positions[center_idx];
         let end = node_positions[end_idx];
+        let line_type = match node_types[center_idx] {
+            NodeType::SubclassOf => 1, // Dotted line
+            _ => 0,                    // Solid line
+        };
 
         let (shape_type, shape_dim) = match node_shapes[end_idx] {
             NodeShape::Circle { r } => (0, [r, 0.0]),
@@ -160,6 +167,7 @@ pub fn build_edge_instances(
             end,
             shape_type,
             shape_dim,
+            line_type,
         });
     }
     edge_instances
@@ -170,8 +178,10 @@ pub fn create_edge_instance_buffer(
     edges: &[[usize; 3]],
     node_positions: &[[f32; 2]],
     node_shapes: &[NodeShape],
+    node_types: &[NodeType],
 ) -> wgpu::Buffer {
-    let edge_instances = build_edge_instances(device, edges, node_positions, node_shapes);
+    let edge_instances =
+        build_edge_instances(device, edges, node_positions, node_shapes, node_types);
 
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("edge_instance_buffer"),

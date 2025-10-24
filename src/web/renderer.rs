@@ -184,7 +184,7 @@ impl State {
             [250.0, 50.0],
             [450.0, 50.0],
             [250.0, 250.0],
-            [450.0, 450.0],
+            [650.0, 450.0],
             [650.0, 50.0],
             [850.0, 50.0],
             [1050.0, 50.0],
@@ -197,6 +197,7 @@ impl State {
             [50.0, 500.0],
             [1250.0, 150.0],
             [1250.0, 350.0],
+            [150.0, 150.0],
         ];
         let labels = vec![
             String::from("My class"),
@@ -216,6 +217,7 @@ impl State {
             String::from("Property1"),
             String::from("Property2"),
             String::from("Property3"),
+            String::new(),
         ];
 
         let node_types = [
@@ -236,10 +238,11 @@ impl State {
             NodeType::ObjectProperty,
             NodeType::DatatypeProperty,
             NodeType::DatatypeProperty,
+            NodeType::SubclassOf,
         ];
 
         let node_shapes = vec![
-            NodeShape::Circle { r: 2.0 },
+            NodeShape::Circle { r: 1.0 },
             NodeShape::Circle { r: 1.0 },
             NodeShape::Circle { r: 1.0 },
             NodeShape::Circle { r: 1.0 },
@@ -256,9 +259,10 @@ impl State {
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
         ];
 
-        let edges = [[0, 14, 1], [13, 15, 8], [8, 16, 13]];
+        let edges = [[0, 14, 1], [13, 15, 8], [8, 16, 13], [0, 17, 3]];
 
         // Combine positions and types into NodeInstance entries
         let node_instance_buffer = vertex_buffer::create_node_instance_buffer(
@@ -341,8 +345,13 @@ impl State {
 
         let num_vertices = VERTICES.len() as u32;
 
-        let edge_instance_buffer =
-            vertex_buffer::create_edge_instance_buffer(&device, &edges, &positions, &node_shapes);
+        let edge_instance_buffer = vertex_buffer::create_edge_instance_buffer(
+            &device,
+            &edges,
+            &positions,
+            &node_shapes,
+            &node_types,
+        );
         let num_edge_instances = edges.len() as u32;
 
         let edge_shader =
@@ -546,6 +555,7 @@ impl State {
                 NodeType::DisjointUnion => vec![("1", attrs.clone())],
                 NodeType::Intersection => vec![("∩", attrs.clone())],
                 NodeType::Union => vec![("∪", attrs.clone())],
+                NodeType::SubclassOf => vec![("Subclass of", attrs.clone())],
                 _ => vec![(label.as_str(), attrs.clone())],
             };
             buf.set_rich_text(
@@ -755,6 +765,15 @@ impl State {
 
         self.positions[8] = [self.positions[8][0] + x, self.positions[8][1] + y];
 
+        self.positions[3] = [
+            self.positions[3][0] + x / 2.0,
+            self.positions[3][1] + x / 2.0,
+        ];
+        self.positions[17] = [
+            self.positions[17][0] + x / 4.0,
+            self.positions[17][1] + x / 4.0,
+        ];
+
         let node_instances = vertex_buffer::build_node_instances(
             &self.device,
             &self.positions,
@@ -767,6 +786,7 @@ impl State {
             &self.edges,
             &self.positions,
             &self.node_shapes,
+            &self.node_types,
         );
 
         self.queue.write_buffer(
