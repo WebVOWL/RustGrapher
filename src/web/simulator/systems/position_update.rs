@@ -169,7 +169,7 @@ pub struct DragStartSystemData<'a> {
 /// A node is being dragged.
 pub fn sys_drag_start(data: DragStartSystemData) {
     // Valid nodes have an ID greater than zero.
-    if data.dragged_id.0 > 0 {
+    if data.dragged_id.0 >= 0 {
         info!("[{0}] Drag start", data.dragged_id.0);
 
         // Enable simulation when node is dragged
