@@ -62,6 +62,9 @@ impl<'a> System<'a> for UpdateNodePosition {
         for (entity, velocity, _) in (&entities, &mut velocities, &fixed).join() {
             if freeze_threshold.0 < velocity.0.abs().length() {
                 // Update is only visible next dispatch
+
+                // TODO: Remove Fixed if the Dragged node is nearby.
+                // Use NEW quadtree implementation for nearby check.
                 updater.remove::<Fixed>(entity);
             }
         }
@@ -86,6 +89,9 @@ impl<'a> System<'a> for UpdateNodePosition {
                 // );
                 if freeze_threshold.0 > velocity.0.abs().length() {
                     // Update is only visible next dispatch
+
+                    // TODO: Only insert Fixed if the Dragged node is not nearby.
+                    // Use NEW quadtree implementation for nearby check.
                     updater.insert(entity, Fixed);
                     // velocity.0 = Vec2::ZERO;
                 }
