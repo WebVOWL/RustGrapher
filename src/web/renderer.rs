@@ -1,12 +1,14 @@
+mod camera;
 mod node_types;
 mod vertex_buffer;
 
 use crate::web::{
+    node_types::NodeType,
     quadtree::{BoundingBox2D, QuadTree},
-    renderer::node_types::NodeType,
+    renderer::camera::{camera_buffer::CameraUniform, camera_controller::PanCameraController},
     simulator::{Simulator, components::nodes::Position, ressources::events::SimulatorEvent},
 };
-use glam::Vec2;
+use glam::{Vec2, Vec3};
 use glyphon::{
     Attrs, Buffer as GlyphBuffer, Cache, Color, Family, FontSystem, Metrics, Resolution, Shaping,
     SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
@@ -49,6 +51,10 @@ pub struct State {
     frame_count: u64, // TODO: Remove after implementing simulator
     simulator: Simulator<'static, 'static>,
     paused: bool,
+
+    // Camera resources
+    camera: Camera,
+    camera_controller: PanCameraController,
 
     // User input
     cursor_position: Option<Vec2>,
@@ -348,6 +354,8 @@ impl State {
             paused: false,
             cursor_position: None,
             node_dragged: false,
+            camera,
+            camera_controller,
             font_system,
             swash_cache,
             viewport,
@@ -436,6 +444,71 @@ impl State {
         self.atlas = Some(atlas);
         self.text_renderer = Some(text_renderer);
         self.text_buffers = Some(text_buffers);
+    }
+
+    fn init_camera(&mut self) {
+        let camera = Camera {
+            // position the camera 1 unit up and 2 units back
+            // +z is out of the screen
+            eye: (0.0, 1.0, 2.0).into(),
+            // have it look at the origin
+            target: (0.0, 0.0, 0.0).into(),
+            // which way is "up"
+            up: Vec3::Y,
+            aspect: self.config.width as f32 / self.config.height as f32,
+            fovy: 45.0,
+            znear: 0.1,
+            zfar: 100.0,
+        };
+
+        let camera_controller = PanCameraController {
+            zoom_factor: 1.0,
+            min_zoom: 0.1,
+            max_zoom: 5.0,
+            zoom_speed: 0.1,
+            ..Default::default()
+        };
+
+        let mut camera_uniform = CameraUniform::new();
+        camera_uniform.update_view_proj(&camera);
+
+        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Camera Buffer"),
+            contents: bytemuck::cast_slice(&[camera_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: Some("camera_bind_group_layout"),
+            });
+
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+            label: Some("camera_bind_group"),
+        });
+        let render_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Render Pipeline Layout"),
+                bind_group_layouts: &[&texture_bind_group_layout, &camera_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        (camera, camera_controller, camera_bind_group)
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
