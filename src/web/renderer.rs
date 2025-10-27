@@ -484,17 +484,6 @@ impl State {
 
         if surface_configured {
             state.init_glyphon();
-            let num_buffers = state.text_buffers.as_ref().map(|b| b.len()).unwrap_or(0);
-            log::info!("Glyphon initialized: {} text buffers", num_buffers);
-            if let Some(text_buffers) = state.text_buffers.as_ref() {
-                for (i, buf) in text_buffers.iter().enumerate() {
-                    log::info!(
-                        "Buffer {} has {} glyphs",
-                        i,
-                        buf.layout_runs().map(|r| r.glyphs.len()).sum::<usize>()
-                    );
-                }
-            }
         }
 
         Ok(state)

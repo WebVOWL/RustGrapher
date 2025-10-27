@@ -1,3 +1,4 @@
+use web_sys::js_sys::Math::atan2;
 use wgpu::util::DeviceExt;
 
 use crate::web::renderer::{node_shape::NodeShape, node_types::NodeType};
@@ -157,14 +158,38 @@ pub fn build_edge_instances(
             _ => 0,                      // Solid line with black arrow
         };
 
-        let (shape_type, shape_dim) = match node_shapes[end_idx] {
+        let (shape_type, mut shape_dim) = match node_shapes[end_idx] {
             NodeShape::Circle { r } => (0, [r, 0.0]),
             NodeShape::Rectangle { w, h } => (1, [w, h]),
         };
-        // TODO: handle symmetric properties
-        // if start_idx == end_idx {
-        //
-        // }
+        // Handle symmetric properties
+        if start_idx == end_idx {
+            let radius_pix = 50.0;
+            let node_center = node_positions[start_idx];
+            if let NodeShape::Circle { r } = node_shapes[start_idx] {
+                // Calculate angle from start node to center node
+                let dx = center[0] - node_center[0];
+                let dy = center[1] - node_center[1];
+                let angle = atan2(dy as f64, dx as f64) as f32; // radians
+
+                // Offset direction perpendicular to angle
+                let offset_angle = angle + std::f32::consts::FRAC_PI_2;
+                let offset_x = offset_angle.cos() * radius_pix * 0.5;
+                let offset_y = offset_angle.sin() * radius_pix * 0.5;
+
+                // Move start and end points along the rotated direction
+                start = [
+                    node_center[0] + offset_x + r * radius_pix / 4.0 * angle.cos(),
+                    node_center[1] + offset_y + r * radius_pix / 4.0 * angle.sin(),
+                ];
+                end = [
+                    node_center[0] - offset_x + r * radius_pix / 4.0 * angle.cos(),
+                    node_center[1] - offset_y + r * radius_pix / 4.0 * angle.sin(),
+                ];
+
+                shape_dim[0] = r / 2.0;
+            }
+        }
 
         edge_instances.push(EdgeInstance {
             start,
