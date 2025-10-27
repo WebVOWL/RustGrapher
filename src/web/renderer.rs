@@ -205,6 +205,7 @@ impl State {
             [750.0, 250.0],
             [850.0, 350.0],
             [750.0, 450.0],
+            [550.0, 50.0],
         ];
         let labels = vec![
             String::from("My class"),
@@ -230,6 +231,7 @@ impl State {
             String::from("Deprecated"),
             String::from("External"),
             String::from("Symmetric"),
+            String::from("Property-InverseProperty"),
         ];
 
         let node_types = [
@@ -256,6 +258,7 @@ impl State {
             NodeType::DeprecatedProperty,
             NodeType::ExternalProperty,
             NodeType::ObjectProperty,
+            NodeType::InverseProperty,
         ];
 
         let node_shapes = vec![
@@ -282,6 +285,7 @@ impl State {
             NodeShape::Rectangle { w: 0.8, h: 1.0 },
             NodeShape::Rectangle { w: 0.8, h: 1.0 },
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Rectangle { w: 0.9, h: 1.0 },
         ];
 
         let edges = [
@@ -294,6 +298,7 @@ impl State {
             [10, 20, 11],
             [11, 21, 12],
             [12, 22, 12],
+            [2, 23, 5],
         ];
 
         let cardinalities: Vec<(u32, (String, Option<String>))> = vec![
@@ -536,7 +541,7 @@ impl State {
             // TODO: update if we implement dynamic node size
             let label_width = 90.0 * scale;
             let label_height = match self.node_types[i] {
-                NodeType::DisjointWith => 62.0 * scale,
+                NodeType::DisjointWith | NodeType::InverseProperty => 62.0 * scale,
                 NodeType::ExternalClass | NodeType::DeprecatedClass | NodeType::EquivalentClass => {
                     48.0
                 }
@@ -547,7 +552,7 @@ impl State {
             // sample label using the NodeType
             let attrs = &Attrs::new().family(Family::SansSerif);
             let node_type_metrics = Metrics::new(font_px - 3.0, line_px);
-            let mut all_owned_eq_labels: Vec<String> = Vec::new();
+            let mut all_owned_labels: Vec<String> = Vec::new();
             let spans = match self.node_types[i] {
                 NodeType::EquivalentClass => {
                     // TODO: Update when handling equivalent classes from ontology
@@ -560,11 +565,11 @@ impl State {
                     for eq_label in eq_labels {
                         let mut extended_label = eq_label.to_string();
                         extended_label.push_str(", ");
-                        all_owned_eq_labels.push(extended_label);
+                        all_owned_labels.push(extended_label);
                     }
-                    all_owned_eq_labels.push(last_label.to_string());
+                    all_owned_labels.push(last_label.to_string());
 
-                    for extended_label in &all_owned_eq_labels {
+                    for extended_label in &all_owned_labels {
                         eq_labels_attributes.push((extended_label.as_str(), attrs.clone()));
                     }
 
@@ -572,6 +577,18 @@ impl State {
                     combined_labels.append(&mut eq_labels_attributes);
 
                     combined_labels
+                }
+                NodeType::InverseProperty => {
+                    let mut labels: Vec<&str> = label.split('-').collect();
+                    let label1 = labels.get(0).map_or("", |v| *v);
+                    let label2 = labels.get(1).map_or("", |v| *v);
+                    all_owned_labels.push(label1);
+                    all_owned_labels.push(label2);
+                    let mut labels_attributes: Vec<(&str, _)> = Vec::new();
+                    for extended_label in &all_owned_labels {
+                        labels_attributes.push((extended_label.as_str(), attrs.clone()));
+                    }
+                    labels_attributes
                 }
                 NodeType::ExternalClass => vec![
                     (label.as_str(), attrs.clone()),

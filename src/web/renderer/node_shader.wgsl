@@ -54,6 +54,7 @@ fn vs_node_main(
 // parameters
 const BORDER_THICKNESS = 0.03;   // how thick the border ring is
 const EDGE_SOFTNESS    = 0.02;   // anti-aliasing
+const RECT_SCALE = vec2(0.9, 0.25);
 // polar angle based repeating pattern (dotted border)
 const PI = 3.14159265;
 const DOT_COUNT = 14.0;        // number of dots around the ring
@@ -411,7 +412,8 @@ fn draw_anonymous_class(v_uv: vec2<f32>) -> vec4<f32> {
 
 fn draw_literal(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
     let rect_center = vec2<f32>(0.5, 0.5);
-    let rect_size = vec2(0.9, 0.25 * shape_dimensions.y);
+    var rect_size = RECT_SCALE;
+    rect_size.y *= shape_dimensions.y;
     let dot_count_rect = 11.0;
     let dot_radius_rect = 0.3;
     let fill_color = LITERAL_COLOR;
@@ -540,7 +542,9 @@ fn draw_rdfs_resource(v_uv: vec2<f32>) -> vec4<f32> {
 
 fn draw_datatype(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
     let rect_center = vec2<f32>(0.5, 0.5);
-    let rect_size = vec2(0.9, 0.25 * shape_dimensions.y);
+    var rect_size = RECT_SCALE;
+    rect_size.y *= shape_dimensions.y;
+
     let fill_color = LITERAL_COLOR;
     let border_thickness_rect = 0.02;
 
@@ -565,11 +569,6 @@ fn draw_datatype(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
         border_mask = 1.0;
     }
 
-    // perimeter coordinate
-    let width = 2.0 * half_size.x;
-    let height = 2.0 * half_size.y;
-    let perim = 2.0 * (width + height);
-
     // composite
     var col = BACKGROUND_COLOR;
     col = mix(col, BORDER_COLOR, border_mask);
@@ -582,7 +581,8 @@ fn draw_datatype(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
 
 fn draw_property(v_uv: vec2<f32>, shape_dimensions: vec2<f32>, fill_color: vec3<f32>) -> vec4<f32> {
     let rect_center = vec2<f32>(0.5, 0.5);
-    let rect_size = vec2(0.9, 0.25 * shape_dimensions.y);
+    var rect_size = RECT_SCALE;
+    rect_size.y *= shape_dimensions.y;
 
     let p = v_uv - rect_center;
 
@@ -598,10 +598,39 @@ fn draw_property(v_uv: vec2<f32>, shape_dimensions: vec2<f32>, fill_color: vec3<
         fill_mask = 1.0;
     }
 
-    // perimeter coordinate
-    let width = 2.0 * half_size.x;
-    let height = 2.0 * half_size.y;
-    let perim = 2.0 * (width + height);
+    // composite
+    var col = BACKGROUND_COLOR;
+    col = mix(col, fill_color, fill_mask);
+
+    let alpha = clamp(fill_mask, 0.0, 1.0);
+
+    return vec4<f32>(col, alpha);
+}
+
+fn draw_inverse_property(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
+    let fill_color = LIGHT_BLUE;
+    let rect_center1 = vec2<f32>(0.5, 0.35);
+    let rect_center2 = vec2<f32>(0.5, 0.65);
+    var rect_size = RECT_SCALE;
+    rect_size.y *= shape_dimensions.y;
+
+    let p1 = v_uv - rect_center1;
+    let p2 = v_uv - rect_center2;
+
+    let half_size = 0.5 * rect_size;
+
+    let inside_x1 = abs(p1.x) <= half_size.x;
+    let inside_y1 = abs(p1.y) <= half_size.y;
+    let inside_x2 = abs(p2.x) <= half_size.x;
+    let inside_y2 = abs(p2.y) <= half_size.y;
+
+    let inside_rect1 = inside_x1 && inside_y1;
+    let inside_rect2 = inside_x2 && inside_y2;
+    // mask selection
+    var fill_mask = 0.0;
+    if(inside_rect1 || inside_rect2) {
+        fill_mask = 1.0;
+    }
 
     // composite
     var col = BACKGROUND_COLOR;
@@ -614,7 +643,8 @@ fn draw_property(v_uv: vec2<f32>, shape_dimensions: vec2<f32>, fill_color: vec3<
 
 fn draw_disjoint_with(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
     let rect_center = vec2<f32>(0.5, 0.5);
-    let rect_size = vec2(0.9, 0.25 * shape_dimensions.y);
+    var rect_size = RECT_SCALE;
+    rect_size.y *= shape_dimensions.y;
 
     let p = v_uv - rect_center;
 
@@ -696,7 +726,7 @@ fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>, shape_dimensions: vec2<f32
         case 14: {return draw_property(v_uv, shape_dimensions, LIGHT_BLUE);}
         case 15: {return draw_property(v_uv, shape_dimensions, DATATYPE_PROPERTY_COLOR);}
         case 16: {return draw_property(v_uv, shape_dimensions, vec3<f32>(1.0));}
-        // case 17: {return draw_inverse_property(v_uv, shape_dimensions);}
+        case 17: {return draw_inverse_property(v_uv, shape_dimensions);}
         case 18: {return draw_disjoint_with(v_uv, shape_dimensions);}
         case 19: {return draw_property(v_uv, shape_dimensions, RDFS_COLOR);}
         case 20: {return draw_property(v_uv, shape_dimensions, DEPRECATED_COLOR);}
