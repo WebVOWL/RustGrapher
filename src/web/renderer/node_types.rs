@@ -22,4 +22,5 @@ pub enum NodeType {
     RdfProperty,
     DeprecatedProperty,
     ExternalProperty,
+    ValuesFrom,
 }

@@ -55,6 +55,7 @@ struct State {
     edges: Vec<[usize; 3]>,
     node_types: Vec<NodeType>,
     node_shapes: Vec<NodeShape>,
+    cardinalities: Vec<(u32, (String, Option<String>))>,
     frame_count: u64, // TODO: Remove after implementing simulator
 
     // Glyphon resources are initialized lazily when we have a non-zero surface.
@@ -65,6 +66,7 @@ struct State {
     text_renderer: Option<TextRenderer>,
     // one glyphon buffer per node containing its text (created when glyphon is initialized)
     text_buffers: Option<Vec<GlyphBuffer>>,
+    cardinality_text_buffers: Option<Vec<(usize, GlyphBuffer)>>,
     window: Arc<Window>,
 }
 
@@ -219,9 +221,9 @@ impl State {
             String::new(),
             String::new(),
             String::from("Datatype"),
+            String::from("AllValues"),
             String::from("Property1"),
             String::from("Property2"),
-            String::from("Property3"),
             String::new(),
             String::new(),
             String::from("is a"),
@@ -245,7 +247,7 @@ impl State {
             NodeType::Intersection,
             NodeType::Union,
             NodeType::Datatype,
-            NodeType::ObjectProperty,
+            NodeType::ValuesFrom,
             NodeType::DatatypeProperty,
             NodeType::DatatypeProperty,
             NodeType::SubclassOf,
@@ -292,6 +294,12 @@ impl State {
             [10, 20, 11],
             [11, 21, 12],
             [12, 22, 12],
+        ];
+
+        let cardinalities: Vec<(u32, (String, Option<String>))> = vec![
+            (0, ("∀".to_string(), None)),
+            (8, ("1".to_string(), None)),
+            (1, ("1".to_string(), Some("10".to_string()))),
         ];
 
         // Combine positions and types into NodeInstance entries
@@ -444,6 +452,7 @@ impl State {
         let atlas = None;
         let text_renderer = None;
         let text_buffers = None;
+        let cardinality_text_buffers = None;
 
         // Create one text buffer per node with sample labels
         // text_buffers are created when glyphon is initialized (lazy).
@@ -472,6 +481,7 @@ impl State {
             edges: edges.to_vec(),
             node_types: node_types.to_vec(),
             node_shapes,
+            cardinalities,
             frame_count: 0,
             font_system,
             swash_cache,
@@ -479,6 +489,7 @@ impl State {
             atlas,
             text_renderer,
             text_buffers,
+            cardinality_text_buffers,
             window,
         };
 
@@ -527,10 +538,10 @@ impl State {
             let label_height = match self.node_types[i] {
                 NodeType::DisjointWith => 62.0 * scale,
                 NodeType::ExternalClass | NodeType::DeprecatedClass | NodeType::EquivalentClass => {
-                    48.0 * scale
+                    48.0
                 }
-                _ => 24.0 * scale,
-            };
+                _ => 24.0,
+            } * scale;
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
             buf.set_wrap(&mut font_system, glyphon::Wrap::None);
             // sample label using the NodeType
@@ -593,12 +604,42 @@ impl State {
             text_buffers.push(buf);
         }
 
+        // cardinalities
+        let mut cardinality_buffers: Vec<(usize, GlyphBuffer)> = Vec::new();
+        for (edge_u32, (cardinality_min, cardinality_max)) in self.cardinalities.iter() {
+            let edge_idx = *edge_u32 as usize;
+            let font_px = 12.0 * scale;
+            let line_px = 12.0 * scale;
+            let mut buf = GlyphBuffer::new(&mut font_system, Metrics::new(font_px, line_px));
+            let label_width = 48.0 * scale;
+            let label_height = 24.0 * scale;
+            buf.set_size(&mut font_system, Some(label_width), Some(label_height));
+
+            let attrs = &Attrs::new().family(Family::SansSerif);
+            let cardinality_text = match cardinality_max {
+                Some(max) => format!("{}..{}", cardinality_min, max),
+                None => format!("{}", cardinality_min),
+            };
+            let spans = vec![(cardinality_text.as_str(), attrs.clone())];
+            buf.set_rich_text(
+                &mut font_system,
+                spans,
+                &attrs,
+                Shaping::Advanced,
+                Some(glyphon::cosmic_text::Align::Center),
+            );
+            buf.shape_until_scroll(&mut font_system, false);
+
+            cardinality_buffers.push((edge_idx, buf));
+        }
+
         self.font_system = Some(font_system);
         self.swash_cache = Some(swash_cache);
         self.viewport = Some(viewport);
         self.atlas = Some(atlas);
         self.text_renderer = Some(text_renderer);
         self.text_buffers = Some(text_buffers);
+        self.cardinality_text_buffers = Some(cardinality_buffers);
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -686,6 +727,76 @@ impl State {
                     default_color: Color::rgb(0, 0, 0),
                     custom_glyphs: &[],
                 });
+            }
+
+            // cardinalities
+            if let Some(card_buffers) = self.cardinality_text_buffers.as_ref() {
+                for (edge_idx, buf) in card_buffers.iter() {
+                    // make sure edge index is valid
+                    if *edge_idx >= self.edges.len() {
+                        continue;
+                    }
+                    let edge = self.edges[*edge_idx];
+                    let center_idx = edge[1];
+                    let end_idx = edge[2];
+
+                    // node logical coords
+                    let center_log = self.positions[center_idx];
+                    let end_log = self.positions[end_idx];
+
+                    // convert to physical pixels
+                    let center_x_px = center_log[0] * scale;
+                    let center_y_px = vp_h_px - center_log[1] * scale;
+                    let end_x_px = end_log[0] * scale;
+                    let end_y_px = vp_h_px - end_log[1] * scale;
+
+                    // direction vector (center - start) in physical pixel space
+                    let dir_x = center_x_px - end_x_px;
+                    let dir_y = center_y_px - end_y_px;
+
+                    let offset_px = match self.node_shapes[end_idx] {
+                        NodeShape::Circle { r } => 65.0 * r * scale,
+
+                        NodeShape::Rectangle { w, h } => {
+                            // TODO: update offset based on angle
+                            // angle
+                            // let angle = dir_y.atan2(dir_x);
+                            60.0 * w * scale
+                        }
+                    };
+
+                    // normalized direction (guard against zero-length)
+                    let len = (dir_x * dir_x + dir_y * dir_y).sqrt().max(1.0);
+                    let nx = dir_x / len;
+                    let ny = dir_y / len;
+
+                    // place label at end node plus offset along the center-->end angle
+                    let card_x_px = end_x_px + nx * (offset_px + 10.0);
+                    let card_y_px = end_y_px + ny * offset_px;
+
+                    // compute bounds from buffer size and center the label
+                    let (label_w_opt, label_h_opt) = buf.size();
+                    let label_w = label_w_opt.unwrap_or(48.0) as f32;
+                    let label_h = label_h_opt.unwrap_or(24.0) as f32;
+
+                    let left = card_x_px - label_w * 0.5;
+                    let top = card_y_px - label_h * 0.5;
+
+                    areas.push(TextArea {
+                        buffer: buf,
+                        left,
+                        top,
+                        scale: 1.0,
+                        bounds: TextBounds {
+                            left: left as i32,
+                            top: top as i32,
+                            right: (left + label_w) as i32,
+                            bottom: (top + label_h) as i32,
+                        },
+                        default_color: Color::rgb(0, 0, 0),
+                        custom_glyphs: &[],
+                    });
+                }
             }
 
             viewport.update(

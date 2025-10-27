@@ -155,6 +155,7 @@ pub fn build_edge_instances(
         let line_type = match node_types[center_idx] {
             NodeType::SubclassOf => 1,   // Dotted line with white arrow
             NodeType::DisjointWith => 2, // Dotted line with no arrow
+            NodeType::ValuesFrom => 3,   // Blue line and arrow
             _ => 0,                      // Solid line with black arrow
         };
 

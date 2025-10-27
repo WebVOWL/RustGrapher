@@ -87,7 +87,7 @@ fn vs_edge_main(in: VertIn) -> VertOut {
 }
 
 // arrow constants (pixels)
-const ARROW_LENGTH_PX = 15.0;
+const ARROW_LENGTH_PX = 10.0;
 const ARROW_WIDTH_PX  = 15.0;
 const ARROW_AA     = 0.1;
 const NODE_RADIUS_PIX = 50.0;
@@ -113,7 +113,7 @@ fn dist_and_t_to_bezier(px: vec2<f32>, p0: vec2<f32>, ctrl: vec2<f32>, p2: vec2<
 
     // Newton-Raphson refine
     var t = best_t;
-    for (var iter = 0; iter < 8; iter = iter + 1) {
+    for (var iter = 0; iter < 16; iter = iter + 1) {
         let bt = a * t * t + b * t + p0;
         let dBt = 2.0 * a * t + b;
         let diff = bt - px;
@@ -244,6 +244,12 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
 
     // Default arrow fill (black)
     var arrow_color = vec3<f32>(0.0);
+
+    // blue line for AllValuesFrom and SomeValuesFrom
+    if in.v_line_type == 3u {
+        color = vec3<f32>(0.4, 0.6, 0.8);
+        arrow_color = vec3<f32>(0.4, 0.6, 0.8);
+    }
 
     // Compute if inside arrow
     let inside_arrow = arrow_alpha > 0.0;

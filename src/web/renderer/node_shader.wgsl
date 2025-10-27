@@ -701,6 +701,7 @@ fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>, shape_dimensions: vec2<f32
         case 19: {return draw_property(v_uv, shape_dimensions, RDFS_COLOR);}
         case 20: {return draw_property(v_uv, shape_dimensions, DEPRECATED_COLOR);}
         case 21: {return draw_property(v_uv, shape_dimensions, DARK_BLUE);}
+        case 22: {return draw_property(v_uv, shape_dimensions, LIGHT_BLUE);}
         default: {return vec4<f32>(0.0);}
     }
 }
