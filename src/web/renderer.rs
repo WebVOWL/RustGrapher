@@ -187,7 +187,7 @@ impl State {
             [450.0, 50.0],
             [250.0, 250.0],
             [650.0, 450.0],
-            [650.0, 50.0],
+            [700.0, 50.0],
             [850.0, 50.0],
             [1050.0, 50.0],
             [1050.0, 250.0],
@@ -205,7 +205,7 @@ impl State {
             [750.0, 250.0],
             [850.0, 350.0],
             [750.0, 450.0],
-            [550.0, 50.0],
+            [575.0, 50.0],
         ];
         let labels = vec![
             String::from("My class"),
@@ -285,7 +285,7 @@ impl State {
             NodeShape::Rectangle { w: 0.8, h: 1.0 },
             NodeShape::Rectangle { w: 0.8, h: 1.0 },
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Rectangle { w: 0.9, h: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
         ];
 
         let edges = [
@@ -580,9 +580,10 @@ impl State {
                 }
                 NodeType::InverseProperty => {
                     let mut labels: Vec<&str> = label.split('-').collect();
-                    let label1 = labels.get(0).map_or("", |v| *v);
+                    let mut label1 = labels.get(0).map_or("", |v| *v).to_string();
+                    label1.push_str("\n\n");
                     let label2 = labels.get(1).map_or("", |v| *v);
-                    all_owned_labels.push(label1.to_string());
+                    all_owned_labels.push(label1);
                     all_owned_labels.push(label2.to_string());
                     let mut labels_attributes: Vec<(&str, _)> = Vec::new();
                     for extended_label in &all_owned_labels {
@@ -710,7 +711,14 @@ impl State {
             let mut areas: Vec<TextArea> = Vec::new();
             for (i, buf) in text_buffers.iter().enumerate() {
                 // node logical coords
-                let node_logical = self.positions[i];
+                let node_logical = match self.node_types[i] {
+                    NodeType::InverseProperty => {
+                        let position_x = self.positions[i][0];
+                        let position_y = self.positions[i][1] + 12.0;
+                        [position_x, position_y]
+                    }
+                    _ => self.positions[i],
+                };
 
                 // convert node coords to physical pixels
                 let node_x_px = node_logical[0] * scale;
@@ -932,6 +940,8 @@ impl State {
             self.positions[22][0] + x / 2.0,
             self.positions[22][1] + y / 2.0,
         ];
+
+        self.positions[23] = [self.positions[23][0], self.positions[23][1] + y / 4.0];
 
         let node_instances = vertex_buffer::build_node_instances(
             &self.device,
