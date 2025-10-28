@@ -582,8 +582,8 @@ impl State {
                     let mut labels: Vec<&str> = label.split('-').collect();
                     let label1 = labels.get(0).map_or("", |v| *v);
                     let label2 = labels.get(1).map_or("", |v| *v);
-                    all_owned_labels.push(label1);
-                    all_owned_labels.push(label2);
+                    all_owned_labels.push(label1.to_string());
+                    all_owned_labels.push(label2.to_string());
                     let mut labels_attributes: Vec<(&str, _)> = Vec::new();
                     for extended_label in &all_owned_labels {
                         labels_attributes.push((extended_label.as_str(), attrs.clone()));
