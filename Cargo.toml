@@ -17,7 +17,7 @@
     name="grapher"
     readme="README.md"
     repository="https://github.com/WebVOWL/RustGrapher"
-    version="0.3.2"
+    version="0.3.3"
 
 [lib]
     crate-type=["cdylib", "rlib"]
@@ -28,7 +28,7 @@
     glam="0.29.0"
     glyphon={git="https://github.com/grovesNL/glyphon", rev="de4b5b8"}
     log="0.4.0"
-    pollster="0.4.0"
+
     rayon="1.10.0"
     wgpu={version="27.0.1", default-features=false, features=[
         "webgl",
@@ -43,7 +43,7 @@
     env_logger="0.11.0"
     glium="0.33.0"
     petgraph="0.6.5"
-    pollster="0.3.0"
+    pollster="0.4.0"
     rand="0.8.5"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

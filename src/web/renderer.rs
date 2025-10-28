@@ -7,9 +7,31 @@ use crate::web::{
     simulator::{Simulator, components::nodes::Position, ressources::events::SimulatorEvent},
 };
 use glam::Vec2;
+use log::info;
+use std::{cmp::min, sync::Arc};
+use wgpu::{Face, util::DeviceExt};
+#[cfg(target_arch = "wasm32")]
+use winit::platform::web::EventLoopExtWebSys;
+use winit::{
+    application::ApplicationHandler,
+    event::*,
+    event_loop::{ActiveEventLoop, EventLoop},
+    keyboard::{KeyCode, PhysicalKey},
+    window::Window,
+};
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+use vertex_buffer::{NodeInstance, VERTICES, Vertex};
+
+use crate::web::simulator::Simulator;
+
+use crate::web::renderer::node_types::NodeType;
+
 use glyphon::{
-    Attrs, Buffer as GlyphBuffer, Cache, Color, Family, FontSystem, Metrics, Resolution, Shaping,
-    SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
+    Attrs, Buffer as GlyphBuffer, BufferLine, Cache, Color, Family, FontSystem, Metrics,
+    Resolution, Shaping, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
 use log::info;
 use specs::shrev::EventChannel;
@@ -67,15 +89,26 @@ pub struct State {
 
 impl State {
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
+        // Check if we can use WebGPU (as if this writing it's only enabled in some browsers)
+        let is_webgpu_enabled = wgpu::util::is_browser_webgpu_supported().await;
+
+        // Pick appropriate render backends
+        // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
+        let backends = if is_webgpu_enabled {
+            wgpu::Backends::BROWSER_WEBGPU
+        } else if cfg!(target_arch = "wasm32") {
+            wgpu::Backends::GL
+        } else {
+            wgpu::Backends::PRIMARY
+        };
+
         info!("Building render state");
 
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
-        // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            #[cfg(target_arch = "wasm32")]
-            backends: wgpu::Backends::GL,
+            backends: backends,
             ..Default::default()
         });
 
@@ -94,8 +127,9 @@ impl State {
                 label: None,
                 required_features: wgpu::Features::empty(),
                 // WebGL doesn't support all of wgpu's features, so if
-                // we're building for the web we'll have to disable some.
-                required_limits: if cfg!(target_arch = "wasm32") {
+                // we're building for a browser not supporting WebGPU,
+                // we'll have to disable some.
+                required_limits: if cfg!(target_arch = "wasm32") && !is_webgpu_enabled {
                     wgpu::Limits::downlevel_webgl2_defaults()
                 } else {
                     wgpu::Limits::default()
@@ -164,14 +198,52 @@ impl State {
         });
 
         // TODO: remove test code after adding simulator
-        let positions = [[0.0, 0.0], [250.0, 50.0], [50.0, 450.0]];
+        let positions = [
+            [50.0, 50.0],
+            [250.0, 50.0],
+            [450.0, 50.0],
+            [250.0, 250.0],
+            [450.0, 450.0],
+            [650.0, 50.0],
+            [850.0, 50.0],
+            [1050.0, 50.0],
+            [1250.0, 50.0],
+            [450.0, 250.0],
+            [650.0, 250.0],
+            [850.0, 250.0],
+            [1050.0, 250.0],
+        ];
         let labels = vec![
             String::from("My class"),
+            String::from("Rdfs class"),
+            String::from("Rdfs resource"),
             String::from("Loooooooong class"),
             String::from("Thing"),
+            String::from("Eq1-Eq2-Eq3"),
+            String::from("Deprecated"),
+            String::new(),
+            String::from("Literal"),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
         ];
 
-        let node_types = [NodeType::Class, NodeType::ExternalClass, NodeType::Thing];
+        let node_types = [
+            NodeType::Class,
+            NodeType::RdfsClass,
+            NodeType::RdfsResource,
+            NodeType::ExternalClass,
+            NodeType::Thing,
+            NodeType::EquivalentClass,
+            NodeType::DeprecatedClass,
+            NodeType::AnonymousClass,
+            NodeType::Literal,
+            NodeType::Complement,
+            NodeType::DisjointUnion,
+            NodeType::Intersection,
+            NodeType::Union,
+        ];
 
         // Combine positions and types into NodeInstance entries
 
@@ -202,7 +274,7 @@ impl State {
             });
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
+            label: Some("Node Pipeline"),
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -266,6 +338,7 @@ impl State {
 
         let edge_shader =
             device.create_shader_module(wgpu::include_wgsl!("./renderer/edge_shader.wgsl"));
+
         let edge_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Edge Pipeline"),
             layout: Some(&render_pipeline_layout),
@@ -287,12 +360,22 @@ impl State {
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
-                front_face: wgpu::FrontFace::Cw,
-                cull_mode: None,
-                ..Default::default()
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
+                polygon_mode: wgpu::PolygonMode::Fill,
+                // Requires Features::DEPTH_CLIP_CONTROL
+                unclipped_depth: false,
+                // Requires Features::CONSERVATIVE_RASTERIZATION
+                conservative: false,
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
             multiview: None,
             cache: None,
         });
@@ -377,13 +460,13 @@ impl State {
 
     // Initialize glyphon resources and create one text buffer per node.
     fn init_glyphon(&mut self) {
+        // TODO: Update handling of text overflow to use left alignment, and ellipses at end of string
         if self.font_system.is_some() {
             return; // already initialized
         }
 
         // Embed font bytes into the binary
         const DEFAULT_FONT_BYTES: &'static [u8] = include_bytes!("../../assets/DejaVuSans.ttf");
-        // log::info!("Font size: {} bytes", DEFAULT_FONT_BYTES.len());
 
         let mut font_system = FontSystem::new_with_fonts(core::iter::once(
             glyphon::fontdb::Source::Binary(Arc::new(DEFAULT_FONT_BYTES.to_vec())),
@@ -394,12 +477,7 @@ impl State {
         let cache = Cache::new(&self.device);
         let viewport = Viewport::new(&self.device, &cache);
 
-        let mut atlas = TextAtlas::new(
-            &self.device,
-            &self.queue,
-            &cache,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
-        );
+        let mut atlas = TextAtlas::new(&self.device, &self.queue, &cache, self.config.format);
         let text_renderer = TextRenderer::new(
             &mut atlas,
             &self.device,
@@ -408,20 +486,68 @@ impl State {
         );
         let scale = self.window.scale_factor() as f32;
         let mut text_buffers: Vec<GlyphBuffer> = Vec::new();
-        for label in self.labels.clone() {
-            let font_px = 16.0 * scale; // font size in physical pixels
-            let line_px = 28.0 * scale;
+        for (i, label) in self.labels.clone().iter().enumerate() {
+            let font_px = 12.0 * scale; // font size in physical pixels
+            let line_px = 12.0 * scale;
             let mut buf = GlyphBuffer::new(&mut font_system, Metrics::new(font_px, line_px));
             // per-label size (in physical pixels)
             // TODO: update if we implement dynamic node size
-            let label_width = 96.0 * scale;
-            let label_height = 24.0 * scale;
+            let label_width = 90.0 * scale;
+            let label_height = match self.node_types[i] {
+                NodeType::ExternalClass | NodeType::DeprecatedClass | NodeType::EquivalentClass => {
+                    48.0 * scale
+                }
+                _ => 24.0 * scale,
+            };
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
+            buf.set_wrap(&mut font_system, glyphon::Wrap::None);
             // sample label using the NodeType
             let attrs = &Attrs::new().family(Family::SansSerif);
+            let node_type_metrics = Metrics::new(font_px - 3.0, line_px);
+            let mut all_owned_eq_labels: Vec<String> = Vec::new();
+            let spans = match self.node_types[i] {
+                NodeType::EquivalentClass => {
+                    // TODO: Update when handling equivalent classes from ontology
+                    let mut labels: Vec<&str> = label.split('-').collect();
+                    let label1 = labels.get(0).map_or("", |v| *v);
+                    let eq_labels = labels.split_off(1);
+                    let (last_label, eq_labels) = eq_labels.split_last().unwrap();
+
+                    let mut eq_labels_attributes: Vec<(&str, _)> = Vec::new();
+                    for eq_label in eq_labels {
+                        let mut extended_label = eq_label.to_string();
+                        extended_label.push_str(", ");
+                        all_owned_eq_labels.push(extended_label);
+                    }
+                    all_owned_eq_labels.push(last_label.to_string());
+
+                    for extended_label in &all_owned_eq_labels {
+                        eq_labels_attributes.push((extended_label.as_str(), attrs.clone()));
+                    }
+
+                    let mut combined_labels = vec![(label1, attrs.clone()), ("\n", attrs.clone())];
+                    combined_labels.append(&mut eq_labels_attributes);
+
+                    combined_labels
+                }
+                NodeType::ExternalClass => vec![
+                    (label.as_str(), attrs.clone()),
+                    ("\n(external)", attrs.clone().metrics(node_type_metrics)),
+                ],
+                NodeType::DeprecatedClass => vec![
+                    (label.as_str(), attrs.clone()),
+                    ("\n(deprecated)", attrs.clone().metrics(node_type_metrics)),
+                ],
+                NodeType::Thing => vec![("Thing", attrs.clone())],
+                NodeType::Complement => vec![("¬", attrs.clone())],
+                NodeType::DisjointUnion => vec![("1", attrs.clone())],
+                NodeType::Intersection => vec![("∩", attrs.clone())],
+                NodeType::Union => vec![("∪", attrs.clone())],
+                _ => vec![(label.as_str(), attrs.clone())],
+            };
             buf.set_rich_text(
                 &mut font_system,
-                [(label.as_str(), attrs.clone())],
+                spans,
                 &attrs,
                 Shaping::Advanced,
                 Some(glyphon::cosmic_text::Align::Center),
@@ -440,8 +566,9 @@ impl State {
 
     pub fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
-            self.config.width = width;
-            self.config.height = height;
+            let max_size = self.device.limits().max_texture_dimension_2d;
+            self.config.width = min(width, max_size);
+            self.config.height = min(height, max_size);
             self.surface.configure(&self.device, &self.config);
             self.is_surface_configured = true;
 
@@ -506,8 +633,12 @@ impl State {
                 // center horizontally on node
                 let left = node_x_px - label_w * 0.5;
 
+                let line_height = 8.0;
                 // top = distance-from-top-in-physical-pixels
-                let top = node_y_px - 16.0;
+                let top = match self.node_types[i] {
+                    NodeType::EquivalentClass => node_y_px - 2.0 * line_height,
+                    _ => node_y_px - line_height,
+                };
 
                 areas.push(TextArea {
                     buffer: buf,
@@ -565,9 +696,9 @@ impl State {
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             // Background color
-                            r: 0.84,
-                            g: 0.87,
-                            b: 0.88,
+                            r: 0.93,
+                            g: 0.94,
+                            b: 0.95,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
