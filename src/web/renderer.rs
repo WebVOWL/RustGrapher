@@ -5,7 +5,11 @@ mod vertex_buffer;
 use crate::web::{
     node_types::NodeType,
     quadtree::{BoundingBox2D, QuadTree},
-    renderer::camera::{camera_buffer::CameraUniform, camera_controller::PanCameraController},
+    renderer::camera::{
+        Camera,
+        camera_buffer::CameraUniform,
+        camera_controller::{self, PanCameraController},
+    },
     simulator::{Simulator, components::nodes::Position, ressources::events::SimulatorEvent},
 };
 use glam::{Vec2, Vec3};
@@ -55,6 +59,7 @@ pub struct State {
     // Camera resources
     camera: Camera,
     camera_controller: PanCameraController,
+    camera_bind_group: wgpu::BindGroup,
 
     // User input
     cursor_position: Option<Vec2>,
@@ -199,11 +204,15 @@ impl State {
             label: Some("group0_bind_group"),
         });
 
+        // Initialize camera
+        let (camera, camera_controller, bindgroup_descriptor, camera_bindgroup_layout) =
+            Self::init_camera(&config);
+
         // Include the bind group layout in the pipeline layout
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&resolution_bind_group_layout],
+                bind_group_layouts: &[&resolution_bind_group_layout, &camera_bindgroup_layout],
                 push_constant_ranges: &[],
             });
 
@@ -356,6 +365,7 @@ impl State {
             node_dragged: false,
             camera,
             camera_controller,
+            camera_bind_group,
             font_system,
             swash_cache,
             viewport,
@@ -446,7 +456,14 @@ impl State {
         self.text_buffers = Some(text_buffers);
     }
 
-    fn init_camera(&mut self) {
+    fn init_camera(
+        &config: wgpu::SurfaceConfiguration<Vec<wgpu::TextureFormat, Global>>,
+    ) -> (
+        Camera,
+        PanCameraController,
+        wgpu::BindGroupDescriptor,
+        wgpu::BindGroupLayout,
+    ) {
         let camera = Camera {
             // position the camera 1 unit up and 2 units back
             // +z is out of the screen
@@ -455,7 +472,7 @@ impl State {
             target: (0.0, 0.0, 0.0).into(),
             // which way is "up"
             up: Vec3::Y,
-            aspect: self.config.width as f32 / self.config.height as f32,
+            aspect: config.width as f32 / config.height as f32,
             fovy: 45.0,
             znear: 0.1,
             zfar: 100.0,
@@ -501,14 +518,13 @@ impl State {
             }],
             label: Some("camera_bind_group"),
         });
-        let render_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&texture_bind_group_layout, &camera_bind_group_layout],
-                push_constant_ranges: &[],
-            });
 
-        (camera, camera_controller, camera_bind_group)
+        (
+            camera,
+            camera_controller,
+            camera_bind_group,
+            camera_bind_group_layout,
+        )
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -666,6 +682,8 @@ impl State {
             render_pass.set_vertex_buffer(1, self.node_instance_buffer.slice(..));
             // bind group 0 contains resolution uniform
             render_pass.set_bind_group(0, &self.bind_group0, &[]);
+            // Add the camera
+            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
             // draw one quad per node position (instances)
             render_pass.draw(0..self.num_vertices, 0..self.num_instances);
 

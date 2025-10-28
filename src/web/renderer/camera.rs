@@ -4,14 +4,14 @@ pub mod camera_controller;
 use glam::{Mat4, Vec3};
 
 pub struct Camera {
-    eye: Vec3<f32>,
-    target: Vec3<f32>,
-    up: Vec3<f32>,
-    aspect: f32,
+    pub eye: Vec3<f32>,
+    pub target: Vec3<f32>,
+    pub up: Vec3<f32>,
+    pub aspect: f32,
     /// Fovy must be in radians
-    fovy: f32,
-    znear: f32,
-    zfar: f32,
+    pub fovy: f32,
+    pub znear: f32,
+    pub zfar: f32,
 }
 
 impl Camera {
