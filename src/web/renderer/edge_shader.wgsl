@@ -160,7 +160,7 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     // Anti-aliased line alpha
     var line_alpha = 1.0 - smoothstep(LINE_THICKNESS - AA_SOFTNESS, LINE_THICKNESS + AA_SOFTNESS, dist);
 
-    if (in.v_line_type == 1 || in.v_line_type == 2) {
+    if (in.v_line_type == 1u || in.v_line_type == 2u || in.v_line_type == 4u) {
         // Increase number of dots based on length
         let pattern_repeats = (distance(p0, ctrl) + distance(ctrl, p2)) / 10.0;
         let dot_fraction    = 0.6;
@@ -189,12 +189,14 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     }
 
     var tip = p2;
+    var back = p2;
     let shape_type = i32(in.v_end_shape);
     let dims = in.v_shape_dimensions;
 
     if (shape_type == 0) {
         let radius = NODE_RADIUS_PIX * dims.x;
         tip = p2 - dir * radius;
+        back = p2 + dir * radius;
     } else if (shape_type == 1) {
         let rect_size = vec2<f32>(0.9, 0.25 * dims.y);
         let half_size = rect_size * NODE_RADIUS_PIX;
@@ -216,6 +218,7 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
         }
 
         tip = p2 - dir * t_hit;
+        back = p2 + dir * t_hit;
     }
 
     // No arrow for disjoint edges
@@ -270,6 +273,39 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
         // Soft transition between black border and white fill
         let border_smooth = smoothstep(0.0, edge_thickness / ARROW_WIDTH_PX, edge_dist);
         arrow_color = mix(vec3<f32>(0.0), vec3<f32>(1.0), border_smooth);
+    } else if (in.v_line_type == 4u) {
+        // White diamond with black border
+
+        // Diamond center slightly before the tip
+        let diamond_center = tip - dir * (ARROW_LENGTH_PX * 0.5);
+        let perp = vec2<f32>(-dir.y, dir.x);
+
+        // Diamond half-size
+        let half_size = ARROW_WIDTH_PX * 0.5;
+
+        // Local coordinates in rotated frame
+        let local = vec2<f32>(
+            dot(px - diamond_center, dir),
+            dot(px - diamond_center, perp)
+        );
+
+        // Signed distance to a diamond (|x| + |y| = size)
+        let dist_diamond = abs(local.x) + abs(local.y) - half_size;
+
+        // Smooth anti-aliased edge
+        let fill = 1.0 - smoothstep(0.0, ARROW_AA, dist_diamond);
+
+        // Border thickness in pixels
+        let edge_thickness = 2.0;
+
+        // Border mask: inner region shrunk by edge_thickness
+        let dist_inner = abs(local.x) + abs(local.y) - (half_size - edge_thickness);
+        let inner = 1.0 - smoothstep(0.0, ARROW_AA, dist_inner);
+
+        // Black border, white fill
+        let border_mask = clamp(fill - inner, 0.0, 1.0);
+        arrow_color = mix(vec3<f32>(1.0), vec3<f32>(0.0), border_mask);
+        arrow_alpha = fill;
     }
 
     // Blend between arrow and line colors

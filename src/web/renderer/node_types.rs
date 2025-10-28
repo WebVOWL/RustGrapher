@@ -23,4 +23,5 @@ pub enum NodeType {
     DeprecatedProperty,
     ExternalProperty,
     ValuesFrom,
+    NoDraw,
 }

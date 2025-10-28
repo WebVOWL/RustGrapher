@@ -156,7 +156,13 @@ pub fn build_edge_instances(
             NodeType::SubclassOf => 1,   // Dotted line with white arrow
             NodeType::DisjointWith => 2, // Dotted line with no arrow
             NodeType::ValuesFrom => 3,   // Blue line and arrow
-            _ => 0,                      // Solid line with black arrow
+            _ => match node_types[start_idx] {
+                NodeType::Union
+                | NodeType::DisjointUnion
+                | NodeType::Complement
+                | NodeType::Intersection => 4,
+                _ => 0, // Solid line with black arrow
+            },
         };
 
         let (shape_type, mut shape_dim) = match node_shapes[end_idx] {
