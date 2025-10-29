@@ -27,22 +27,26 @@ fn vs_node_main(
 ) -> VertOut {
     var out: VertOut;
 
-    // fetch node position (in pixel coordinates) from per-instance attribute
-    let pos_px: vec2<f32> = in.inst_pos;
+    let pos_px = in.inst_pos;
 
-    // quad_pos is [-1..1] so convert to offset in pixels
-    let offset_px = in.quad_pos * vec2(NODE_RADIUS_PIX * in.shape_dimensions.x);
+    // compute non-uniform scale for shape geometry
+    var scale_xy = vec2<f32>(in.shape_dimensions.x, in.shape_dimensions.y);
+    if (in.shape == 0u) {
+        // circle -> use same x and y
+        scale_xy = vec2<f32>(in.shape_dimensions.x, in.shape_dimensions.x);
+    }
 
-    // screen position in pixels
+    // offset for screen-space positioning
+    let offset_px = in.quad_pos * (NODE_RADIUS_PIX * scale_xy);
     let screen = pos_px + offset_px;
 
-    // convert to NDC clip space: x -> [-1,1] left->right, y -> [-1,1] bottom->top
     let ndc_x = (screen.x / u_resolution.x) * 2.0 - 1.0;
     let ndc_y = (screen.y / u_resolution.y) * 2.0 - 1.0;
     out.clip_position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
 
-    // uv 0..1 for circle mask; quad_pos [-1..1] -> uv [0..1]
-    out.v_uv = in.quad_pos * 0.5 + vec2<f32>(0.5, 0.5);
+    let aspect = scale_xy.x / scale_xy.y;
+    let aspect_corrected = vec2<f32>(in.quad_pos.x * aspect, in.quad_pos.y);
+    out.v_uv = aspect_corrected * 0.5 + vec2<f32>(0.5, 0.5);
 
     out.v_node_type = in.node_type;
     out.v_shape = in.shape;
@@ -413,7 +417,6 @@ fn draw_anonymous_class(v_uv: vec2<f32>) -> vec4<f32> {
 fn draw_literal(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
     let rect_center = vec2<f32>(0.5, 0.5);
     var rect_size = RECT_SCALE;
-    rect_size.y *= shape_dimensions.y;
     let dot_count_rect = 11.0;
     let dot_radius_rect = 0.3;
     let fill_color = LITERAL_COLOR;
@@ -543,7 +546,6 @@ fn draw_rdfs_resource(v_uv: vec2<f32>) -> vec4<f32> {
 fn draw_datatype(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
     let rect_center = vec2<f32>(0.5, 0.5);
     var rect_size = RECT_SCALE;
-    rect_size.y *= shape_dimensions.y;
 
     let fill_color = LITERAL_COLOR;
     let border_thickness_rect = 0.02;
@@ -582,7 +584,6 @@ fn draw_datatype(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
 fn draw_property(v_uv: vec2<f32>, shape_dimensions: vec2<f32>, fill_color: vec3<f32>) -> vec4<f32> {
     let rect_center = vec2<f32>(0.5, 0.5);
     var rect_size = RECT_SCALE;
-    rect_size.y *= shape_dimensions.y;
 
     let p = v_uv - rect_center;
 
@@ -609,10 +610,9 @@ fn draw_property(v_uv: vec2<f32>, shape_dimensions: vec2<f32>, fill_color: vec3<
 
 fn draw_inverse_property(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
     let fill_color = LIGHT_BLUE;
-    let rect_center1 = vec2<f32>(0.5, 0.35);
-    let rect_center2 = vec2<f32>(0.5, 0.65);
+    let rect_center1 = vec2<f32>(0.5, 0.32);
+    let rect_center2 = vec2<f32>(0.5, 0.68);
     var rect_size = RECT_SCALE;
-    rect_size.y *= shape_dimensions.y;
 
     let p1 = v_uv - rect_center1;
     let p2 = v_uv - rect_center2;
@@ -644,7 +644,6 @@ fn draw_inverse_property(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f
 fn draw_disjoint_with(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
     let rect_center = vec2<f32>(0.5, 0.5);
     var rect_size = RECT_SCALE;
-    rect_size.y *= shape_dimensions.y;
 
     let p = v_uv - rect_center;
 
@@ -656,8 +655,8 @@ fn draw_disjoint_with(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32>
     let perim = 2.0 * (width + height);
 
     // positions for two inner circles
-    let circle_r = 0.15;
-    let offset = 0.19;
+    let circle_r = 0.10;
+    let offset = 0.15;
     let c1 = vec2<f32>(0.5 - offset, 0.5);
     let c2 = vec2<f32>(0.5 + offset, 0.5);
 

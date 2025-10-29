@@ -189,17 +189,12 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     }
 
     var tip = p2;
-    var back = p2;
     let shape_type = i32(in.v_end_shape);
     let dims = in.v_shape_dimensions;
 
-    if (shape_type == 0) {
-        let radius = NODE_RADIUS_PIX * dims.x;
-        tip = p2 - dir * radius;
-        back = p2 + dir * radius;
-    } else if (shape_type == 1) {
+    if (shape_type == 1) {
         let rect_size = vec2<f32>(0.9, 0.25 * dims.y);
-        let half_size = rect_size * NODE_RADIUS_PIX;
+        let half_size = rect_size;
 
         let eps = 1e-6;
         var safe_dir = dir;
@@ -218,7 +213,6 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
         }
 
         tip = p2 - dir * t_hit;
-        back = p2 + dir * t_hit;
     }
 
     // No arrow for disjoint edges
@@ -277,7 +271,7 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
         // White diamond with black border
 
         // Diamond center slightly before the tip
-        let diamond_center = tip - dir * (ARROW_LENGTH_PX * 0.5);
+        let diamond_center = tip - dir * (ARROW_WIDTH_PX * 0.25);
         let perp = vec2<f32>(-dir.y, dir.x);
 
         // Diamond half-size

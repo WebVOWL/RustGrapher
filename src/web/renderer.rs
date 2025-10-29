@@ -275,14 +275,14 @@ impl State {
             NodeShape::Circle { r: 1.0 },
             NodeShape::Circle { r: 1.0 },
             NodeShape::Circle { r: 1.0 },
-            NodeShape::Rectangle { w: 1.5, h: 0.5 },
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Rectangle { w: 0.6, h: 2.0 },
-            NodeShape::Rectangle { w: 0.6, h: 1.5 },
-            NodeShape::Rectangle { w: 0.8, h: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Rectangle { w: 0.75, h: 1.0 },
+            NodeShape::Rectangle { w: 0.6, h: 0.8 },
+            NodeShape::Rectangle { w: 0.8, h: 0.8 },
             NodeShape::Rectangle { w: 0.8, h: 1.0 },
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
@@ -543,10 +543,11 @@ impl State {
             // TODO: update if we implement dynamic node size
             let label_width = 90.0 * scale;
             let label_height = match self.node_types[i] {
-                NodeType::DisjointWith | NodeType::InverseProperty => 62.0 * scale,
-                NodeType::ExternalClass | NodeType::DeprecatedClass | NodeType::EquivalentClass => {
-                    48.0
-                }
+                NodeType::DisjointWith => 62.0 * scale,
+                NodeType::ExternalClass
+                | NodeType::DeprecatedClass
+                | NodeType::EquivalentClass
+                | NodeType::InverseProperty => 48.0,
                 _ => 24.0,
             } * scale;
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
@@ -583,7 +584,7 @@ impl State {
                 NodeType::InverseProperty => {
                     let mut labels: Vec<&str> = label.split('-').collect();
                     let mut label1 = labels.get(0).map_or("", |v| *v).to_string();
-                    label1.push_str("\n\n");
+                    label1.push_str("\n\n\n");
                     let label2 = labels.get(1).map_or("", |v| *v);
                     all_owned_labels.push(label1);
                     all_owned_labels.push(label2.to_string());
@@ -716,7 +717,7 @@ impl State {
                 let node_logical = match self.node_types[i] {
                     NodeType::InverseProperty => {
                         let position_x = self.positions[i][0];
-                        let position_y = self.positions[i][1] + 12.0;
+                        let position_y = self.positions[i][1] + 18.0;
                         [position_x, position_y]
                     }
                     _ => self.positions[i],

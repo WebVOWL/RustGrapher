@@ -169,12 +169,15 @@ pub fn build_edge_instances(
             NodeShape::Circle { r } => (0, [r, 0.0]),
             NodeShape::Rectangle { w, h } => (1, [w, h]),
         };
+        let radius_pix = 50.0;
+        let mut start_shape = node_shapes[start_idx];
+        let mut end_shape = node_shapes[end_idx];
         // Handle symmetric properties
         if start_idx == end_idx {
-            let radius_pix = 50.0;
             let node_center = node_positions[start_idx];
+
             if let NodeShape::Circle { r } = node_shapes[start_idx] {
-                // Calculate angle from start node to center node
+                // Calculate angle from start node to center node (control point)
                 let dx = center[0] - node_center[0];
                 let dy = center[1] - node_center[1];
                 let angle = atan2(dy as f64, dx as f64) as f32; // radians
@@ -184,7 +187,7 @@ pub fn build_edge_instances(
                 let offset_x = offset_angle.cos() * radius_pix * 0.5;
                 let offset_y = offset_angle.sin() * radius_pix * 0.5;
 
-                // Move start and end points along the rotated direction
+                // Move start and end points along the rotated direction.
                 start = [
                     node_center[0] + offset_x + r * radius_pix / 4.0 * angle.cos(),
                     node_center[1] + offset_y + r * radius_pix / 4.0 * angle.sin(),
@@ -193,10 +196,97 @@ pub fn build_edge_instances(
                     node_center[0] - offset_x + r * radius_pix / 4.0 * angle.cos(),
                     node_center[1] - offset_y + r * radius_pix / 4.0 * angle.sin(),
                 ];
-
-                shape_dim[0] = r / 2.0;
-            }
+                let half_shape = match start_shape {
+                    NodeShape::Circle { r } => NodeShape::Circle { r: r / 2.0 },
+                    NodeShape::Rectangle { w, h } => NodeShape::Rectangle { w: w / 2.0, h },
+                };
+                start_shape = half_shape;
+                end_shape = half_shape;
+            };
         }
+        let start_center = start;
+        let end_center = end; // same as start_center for self-loop
+
+        // Direction vectors from node center -> control point
+        let dir_start = [center[0] - start_center[0], center[1] - start_center[1]];
+        let dir_end = [center[0] - end_center[0], center[1] - end_center[1]];
+
+        // Lengths
+        let start_len = (dir_start[0] * dir_start[0] + dir_start[1] * dir_start[1]).sqrt();
+        let end_len = (dir_end[0] * dir_end[0] + dir_end[1] * dir_end[1]).sqrt();
+
+        // Normalized directions, guard against zero-length
+        let dir_start_n = if start_len > 1e-6 {
+            [dir_start[0] / start_len, dir_start[1] / start_len]
+        } else {
+            [0.0, -1.0] // fallback direction
+        };
+        let dir_end_n = if end_len > 1e-6 {
+            [dir_end[0] / end_len, dir_end[1] / end_len]
+        } else {
+            [0.0, 1.0] // opposite fallback to separate start/end a bit
+        };
+
+        // Move start point to perimeter of its node
+        start = match start_shape {
+            NodeShape::Circle { r } => [
+                start_center[0] + dir_start_n[0] * r * radius_pix,
+                start_center[1] + dir_start_n[1] * r * radius_pix,
+            ],
+            NodeShape::Rectangle { w, h } => {
+                // Project ray onto rectangle perimeter
+                let dx = dir_start_n[0];
+                let dy = dir_start_n[1];
+                let mut scale = f32::INFINITY;
+
+                if dx.abs() > 1e-6 {
+                    // Effective half-width: (w * radius_pix) * 0.9
+                    scale = scale.min((w * 0.9 / 2.0) / dx.abs());
+                }
+                if dy.abs() > 1e-6 {
+                    // Effective half-height: (w * radius_pix) * 0.25
+                    scale = scale.min((h * 0.25 / 2.0) / dy.abs());
+                }
+
+                if !scale.is_finite() {
+                    [start_center[0], start_center[1]]
+                } else {
+                    [
+                        start_center[0] + dir_start_n[0] * scale * radius_pix,
+                        start_center[1] + dir_start_n[1] * scale * radius_pix,
+                    ]
+                }
+            }
+        };
+
+        // Move end point to perimeter of its node
+        end = match end_shape {
+            NodeShape::Circle { r } => [
+                end_center[0] + dir_end_n[0] * r * radius_pix,
+                end_center[1] + dir_end_n[1] * r * radius_pix,
+            ],
+            NodeShape::Rectangle { w, h } => {
+                let dx = dir_end_n[0];
+                let dy = dir_end_n[1];
+                let mut scale = f32::INFINITY;
+
+                if dx.abs() > 1e-6 {
+                    scale = scale.min((w * 0.9) / dx.abs());
+                }
+                if dy.abs() > 1e-6 {
+                    scale = scale.min((h * 0.25) / dy.abs());
+                }
+
+                if !scale.is_finite() {
+                    [end_center[0], end_center[1]]
+                } else {
+                    [
+                        end_center[0] + dir_end_n[0] * scale * radius_pix,
+                        end_center[1] + dir_end_n[1] * scale * radius_pix,
+                    ]
+                }
+            }
+        };
 
         edge_instances.push(EdgeInstance {
             start,
