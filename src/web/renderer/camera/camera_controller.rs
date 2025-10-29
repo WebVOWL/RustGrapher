@@ -7,38 +7,16 @@
 //!
 //! To configure the settings of this controller, modify the fields of the [`PanCamera`] component.
 
-use bevy_app::{App, Plugin, RunFixedMainLoop, RunFixedMainLoopSystems};
-use bevy_camera::Camera;
-use bevy_ecs::prelude::*;
-use bevy_input::ButtonInput;
-use bevy_input::keyboard::KeyCode;
-use bevy_input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
-use bevy_math::{Vec2, Vec3};
-use bevy_time::{Real, Time};
-use bevy_transform::prelude::Transform;
+use winit::{
+    event::{DeviceEvent, KeyEvent},
+    window::Window,
+};
 
 use core::{f32::consts::*, fmt};
 
-/// A plugin that enables 2D camera panning and zooming controls.
-///
-/// Add this plugin to your [`App`] to enable [`PanCamera`] behavior
-/// on any camera entity that has the [`PanCamera`] component.
-pub struct PanCameraPlugin;
-
-impl Plugin for PanCameraPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            RunFixedMainLoop,
-            run_pancamera_controller.in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
-        );
-    }
-}
+use crate::web::renderer::camera::PanCamera;
 
 /// Configuration and state for a 2D panning camera controller.
-///
-/// Add this component to a [`Camera`] entity to enable keyboard and mouse controls
-/// for panning, zooming, and optional rotation. Requires the [`PanCameraPlugin`].
-#[derive(Component)]
 pub struct PanCameraController {
     /// Enables this [`PanCamera`] when `true`.
     pub enabled: bool,
@@ -114,6 +92,56 @@ impl Default for PanCameraController {
 impl PanCameraController {
     fn key_to_string(key: &Option<KeyCode>) -> String {
         key.map_or("None".to_string(), |k| format!("{:?}", k))
+    }
+
+    pub fn process_device_events(
+        &mut self,
+        event: &DeviceEvent,
+        window: &Window,
+        camera: &mut PanCamera,
+    ) {
+        match event {
+            DeviceEvent::Button {
+                #[cfg(target_os = "macos")]
+                    button: 0, // The Left Mouse Button on macos.
+                // This seems like it is a winit bug?
+                #[cfg(not(target_os = "macos"))]
+                    button: 1, // The Left Mouse Button on all other platforms.
+
+                state,
+            } => {
+                let is_pressed = *state == ElementState::Pressed;
+                self.is_drag_rotate = is_pressed;
+            }
+            DeviceEvent::MouseWheel { delta, .. } => {
+                let scroll_amount = -match delta {
+                    // A mouse line is about 1 px.
+                    MouseScrollDelta::LineDelta(_, scroll) => scroll * 1.0,
+                    MouseScrollDelta::PixelDelta(PhysicalPosition { y: scroll, .. }) => {
+                        *scroll as f32
+                    }
+                };
+                camera.add_distance(scroll_amount * self.zoom_speed);
+                window.request_redraw();
+            }
+            DeviceEvent::MouseMotion { delta } => {
+                if self.is_drag_rotate {
+                    camera.add_yaw(-delta.0 as f32 * self.rotate_speed);
+                    camera.add_pitch(delta.1 as f32 * self.rotate_speed);
+                    window.request_redraw();
+                }
+            }
+            _ => (),
+        }
+    }
+
+    pub fn process_key_events(
+        &mut self,
+        event: &KeyEvent,
+        &window: Window,
+        camera: &mut PanCamera,
+    ) {
+        match event {}
     }
 }
 

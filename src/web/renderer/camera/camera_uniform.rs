@@ -1,6 +1,6 @@
 use glam::Mat4;
 
-use super::Camera;
+use super::PanCamera;
 
 #[repr(C)]
 // This is so we can store this in a buffer
@@ -18,7 +18,7 @@ impl CameraUniform {
         }
     }
 
-    pub fn update_view_proj(&mut self, camera: &Camera) {
+    pub fn update_view_proj(&mut self, camera: &PanCamera) {
         self.view_proj = camera.build_view_projection_matrix().into();
     }
 }

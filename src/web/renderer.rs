@@ -6,9 +6,9 @@ use crate::web::{
     node_types::NodeType,
     quadtree::{BoundingBox2D, QuadTree},
     renderer::camera::{
-        Camera,
-        camera_buffer::CameraUniform,
+        PanCamera,
         camera_controller::{self, PanCameraController},
+        camera_uniform::CameraUniform,
     },
     simulator::{Simulator, components::nodes::Position, ressources::events::SimulatorEvent},
 };
@@ -57,7 +57,7 @@ pub struct State {
     paused: bool,
 
     // Camera resources
-    camera: Camera,
+    camera: PanCamera,
     camera_controller: PanCameraController,
     camera_bind_group: wgpu::BindGroup,
 
@@ -459,12 +459,12 @@ impl State {
     fn init_camera(
         &config: wgpu::SurfaceConfiguration<Vec<wgpu::TextureFormat, Global>>,
     ) -> (
-        Camera,
+        PanCamera,
         PanCameraController,
         wgpu::BindGroupDescriptor,
         wgpu::BindGroupLayout,
     ) {
-        let camera = Camera {
+        let camera = PanCamera {
             // position the camera 1 unit up and 2 units back
             // +z is out of the screen
             eye: (0.0, 1.0, 2.0).into(),
