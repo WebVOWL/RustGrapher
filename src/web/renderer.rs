@@ -2,14 +2,24 @@ mod node_types;
 mod vertex_buffer;
 
 use crate::web::{
-    quadtree::{BoundingBox2D, QuadTree},
     renderer::node_types::NodeType,
     simulator::{Simulator, components::nodes::Position, ressources::events::SimulatorEvent},
 };
 use glam::Vec2;
+use glyphon::{
+    Attrs, Buffer as GlyphBuffer, BufferLine, Cache, Color, Family, FontSystem, Metrics,
+    Resolution, Shaping, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
+};
 use log::info;
+use specs::shrev::EventChannel;
+use specs::{Join, WorldExt};
 use std::{cmp::min, sync::Arc};
+use vertex_buffer::{NodeInstance, VERTICES, Vertex};
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
 use wgpu::{Face, util::DeviceExt};
+use winit::dpi::PhysicalPosition;
+use winit::event::MouseButton;
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::EventLoopExtWebSys;
 use winit::{
@@ -19,29 +29,6 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
     window::Window,
 };
-
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
-use vertex_buffer::{NodeInstance, VERTICES, Vertex};
-
-use crate::web::simulator::Simulator;
-
-use crate::web::renderer::node_types::NodeType;
-
-use glyphon::{
-    Attrs, Buffer as GlyphBuffer, BufferLine, Cache, Color, Family, FontSystem, Metrics,
-    Resolution, Shaping, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
-};
-use log::info;
-use specs::shrev::EventChannel;
-use specs::{Join, WorldExt};
-use std::sync::Arc;
-use vertex_buffer::{NodeInstance, VERTICES, Vertex};
-use wgpu::util::DeviceExt;
-use winit::dpi::PhysicalPosition;
-use winit::event::MouseButton;
-use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
 pub struct State {
     surface: wgpu::Surface<'static>,
