@@ -781,26 +781,39 @@ impl State {
                     // direction vector (center - start) in physical pixel space
                     let dir_x = center_x_px - end_x_px;
                     let dir_y = center_y_px - end_y_px;
+                    let radius_pix = 50.0;
 
-                    let offset_px = match self.node_shapes[end_idx] {
-                        NodeShape::Circle { r } => 65.0 * r * scale,
-
+                    let (offset_px_x, offset_px_y) = match self.node_shapes[end_idx] {
+                        NodeShape::Circle { r } => (
+                            (radius_pix + 15.0) * r * scale,
+                            (radius_pix + 15.0) * r * scale,
+                        ),
                         NodeShape::Rectangle { w, h } => {
-                            // TODO: update offset based on angle
-                            // angle
-                            // let angle = dir_y.atan2(dir_x);
-                            60.0 * w * scale
+                            let mut scale = f32::INFINITY;
+
+                            if dir_x.abs() > 1e-6 {
+                                scale = scale.min((w * 0.9) / dir_x.abs());
+                            }
+                            if dir_y.abs() > 1e-6 {
+                                scale = scale.min((h * 0.25) / dir_y.abs());
+                            }
+
+                            if !scale.is_finite() {
+                                (0.0, 0.0)
+                            } else {
+                                (w * scale * radius_pix, h * scale * radius_pix)
+                            }
                         }
                     };
 
                     // normalized direction (guard against zero-length)
                     let len = (dir_x * dir_x + dir_y * dir_y).sqrt().max(1.0);
-                    let nx = dir_x / len;
+                    let nx: f32 = dir_x / len;
                     let ny = dir_y / len;
 
                     // place label at end node plus offset along the center-->end angle
-                    let card_x_px = end_x_px + nx * (offset_px + 10.0);
-                    let card_y_px = end_y_px + ny * offset_px;
+                    let card_x_px = end_x_px + nx * (offset_px_x);
+                    let card_y_px = end_y_px + ny * offset_px_y;
 
                     // compute bounds from buffer size and center the label
                     let (label_w_opt, label_h_opt) = buf.size();

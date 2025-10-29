@@ -165,7 +165,7 @@ pub fn build_edge_instances(
             },
         };
 
-        let (shape_type, mut shape_dim) = match node_shapes[end_idx] {
+        let (shape_type, shape_dim) = match node_shapes[end_idx] {
             NodeShape::Circle { r } => (0, [r, 0.0]),
             NodeShape::Rectangle { w, h } => (1, [w, h]),
         };
@@ -228,65 +228,69 @@ pub fn build_edge_instances(
         };
 
         // Move start point to perimeter of its node
-        start = match start_shape {
-            NodeShape::Circle { r } => [
-                start_center[0] + dir_start_n[0] * r * radius_pix,
-                start_center[1] + dir_start_n[1] * r * radius_pix,
-            ],
-            NodeShape::Rectangle { w, h } => {
-                // Project ray onto rectangle perimeter
-                let dx = dir_start_n[0];
-                let dy = dir_start_n[1];
-                let mut scale = f32::INFINITY;
+        if start_idx != center_idx {
+            start = match start_shape {
+                NodeShape::Circle { r } => [
+                    start_center[0] + dir_start_n[0] * r * radius_pix,
+                    start_center[1] + dir_start_n[1] * r * radius_pix,
+                ],
+                NodeShape::Rectangle { w, h } => {
+                    // Project ray onto rectangle perimeter
+                    let dx = dir_start_n[0];
+                    let dy = dir_start_n[1];
+                    let mut scale = f32::INFINITY;
 
-                if dx.abs() > 1e-6 {
-                    // Effective half-width: (w * radius_pix) * 0.9
-                    scale = scale.min((w * 0.9 / 2.0) / dx.abs());
-                }
-                if dy.abs() > 1e-6 {
-                    // Effective half-height: (w * radius_pix) * 0.25
-                    scale = scale.min((h * 0.25 / 2.0) / dy.abs());
-                }
+                    if dx.abs() > 1e-6 {
+                        // Effective half-width: (w * radius_pix) * 0.9
+                        scale = scale.min((w * 0.9 / 2.0) / dx.abs());
+                    }
+                    if dy.abs() > 1e-6 {
+                        // Effective half-height: (w * radius_pix) * 0.25
+                        scale = scale.min((h * 0.25 / 2.0) / dy.abs());
+                    }
 
-                if !scale.is_finite() {
-                    [start_center[0], start_center[1]]
-                } else {
-                    [
-                        start_center[0] + dir_start_n[0] * scale * radius_pix,
-                        start_center[1] + dir_start_n[1] * scale * radius_pix,
-                    ]
+                    if !scale.is_finite() {
+                        [start_center[0], start_center[1]]
+                    } else {
+                        [
+                            start_center[0] + dir_start_n[0] * scale * radius_pix,
+                            start_center[1] + dir_start_n[1] * scale * radius_pix,
+                        ]
+                    }
                 }
-            }
-        };
+            };
+        }
 
         // Move end point to perimeter of its node
-        end = match end_shape {
-            NodeShape::Circle { r } => [
-                end_center[0] + dir_end_n[0] * r * radius_pix,
-                end_center[1] + dir_end_n[1] * r * radius_pix,
-            ],
-            NodeShape::Rectangle { w, h } => {
-                let dx = dir_end_n[0];
-                let dy = dir_end_n[1];
-                let mut scale = f32::INFINITY;
+        if end_idx != center_idx {
+            end = match end_shape {
+                NodeShape::Circle { r } => [
+                    end_center[0] + dir_end_n[0] * r * radius_pix,
+                    end_center[1] + dir_end_n[1] * r * radius_pix,
+                ],
+                NodeShape::Rectangle { w, h } => {
+                    let dx = dir_end_n[0];
+                    let dy = dir_end_n[1];
+                    let mut scale = f32::INFINITY;
 
-                if dx.abs() > 1e-6 {
-                    scale = scale.min((w * 0.9) / dx.abs());
-                }
-                if dy.abs() > 1e-6 {
-                    scale = scale.min((h * 0.25) / dy.abs());
-                }
+                    if dx.abs() > 1e-6 {
+                        scale = scale.min((w * 0.9) / dx.abs());
+                    }
+                    if dy.abs() > 1e-6 {
+                        scale = scale.min((h * 0.25) / dy.abs());
+                    }
 
-                if !scale.is_finite() {
-                    [end_center[0], end_center[1]]
-                } else {
-                    [
-                        end_center[0] + dir_end_n[0] * scale * radius_pix,
-                        end_center[1] + dir_end_n[1] * scale * radius_pix,
-                    ]
+                    if !scale.is_finite() {
+                        [end_center[0], end_center[1]]
+                    } else {
+                        [
+                            end_center[0] + dir_end_n[0] * scale * radius_pix,
+                            end_center[1] + dir_end_n[1] * scale * radius_pix,
+                        ]
+                    }
                 }
-            }
-        };
+            };
+        }
 
         edge_instances.push(EdgeInstance {
             start,
