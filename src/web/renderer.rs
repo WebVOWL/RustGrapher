@@ -81,7 +81,7 @@ impl State {
             wgpu::Backends::PRIMARY
         };
 
-        info!("Building render state");
+        info!("Building render state (WebGPU={is_webgpu_enabled})");
 
         let size = window.inner_size();
 
