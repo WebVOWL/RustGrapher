@@ -44,9 +44,8 @@ fn vs_node_main(
     let ndc_y = (screen.y / u_resolution.y) * 2.0 - 1.0;
     out.clip_position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
 
-    let aspect = scale_xy.x / scale_xy.y;
-    let aspect_corrected = vec2<f32>(in.quad_pos.x * aspect, in.quad_pos.y);
-    out.v_uv = aspect_corrected * 0.5 + vec2<f32>(0.5, 0.5);
+    let aspect = vec2<f32>(in.quad_pos.x, in.quad_pos.y);
+    out.v_uv = aspect * 0.5 + vec2<f32>(0.5, 0.5);
 
     out.v_node_type = in.node_type;
     out.v_shape = in.shape;

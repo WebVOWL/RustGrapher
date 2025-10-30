@@ -160,7 +160,7 @@ pub fn build_edge_instances(
                 NodeType::Union
                 | NodeType::DisjointUnion
                 | NodeType::Complement
-                | NodeType::Intersection => 4,
+                | NodeType::Intersection => 4, // Dotted line with diamond arrow
                 _ => 0, // Solid line with black arrow
             },
         };

@@ -213,15 +213,15 @@ impl State {
             String::from("Rdfs resource"),
             String::from("Loooooooong class"),
             String::from("Thing"),
-            String::from("Eq1-Eq2-Eq3"),
+            String::from("Eq1\nEq2\nEq3"),
             String::from("Deprecated"),
             String::new(),
-            String::from("Literal"),
+            String::from("Loooooooong Literal"),
             String::new(),
             String::new(),
             String::new(),
             String::new(),
-            String::from("Datatype"),
+            String::from("This Datatype is very loooooooooong"),
             String::from("AllValues"),
             String::from("Property1"),
             String::from("Property2"),
@@ -231,7 +231,7 @@ impl State {
             String::from("Deprecated"),
             String::from("External"),
             String::from("Symmetric"),
-            String::from("Property-InverseProperty"),
+            String::from("Property\nInverseProperty"),
         ];
 
         let node_types = [
@@ -307,7 +307,52 @@ impl State {
             (0, ("∀".to_string(), None)),
             (8, ("1".to_string(), None)),
             (1, ("1".to_string(), Some("10".to_string()))),
+            (10, ("5".to_string(), Some("10".to_string()))),
         ];
+
+        // FontSystem instance for text measurement
+        let mut font_system =
+            FontSystem::new_with_fonts(core::iter::once(glyphon::fontdb::Source::Binary(
+                Arc::new(include_bytes!("../../assets/DejaVuSans.ttf").to_vec()),
+            )));
+        font_system.db_mut().set_sans_serif_family("DejaVu Sans");
+
+        let mut node_shapes = node_shapes;
+
+        // iterate over labels and update the width of corresponding rectangle nodes
+        for (i, label_text) in labels.iter().enumerate() {
+            // check if the node is a rectangle and get a mutable reference to its properties
+            if let Some(NodeShape::Rectangle { w, .. }) = node_shapes.get_mut(i) {
+                if label_text.is_empty() {
+                    continue;
+                }
+
+                // temporary buffer to measure the text
+                let scale = window.scale_factor() as f32;
+                let mut temp_buffer = glyphon::Buffer::new(
+                    &mut font_system,
+                    Metrics::new(12.0 * scale, 12.0 * scale),
+                );
+
+                temp_buffer.set_text(
+                    &mut font_system,
+                    &label_text,
+                    &Attrs::new(),
+                    Shaping::Advanced,
+                );
+
+                temp_buffer.shape_until_scroll(&mut font_system, false);
+
+                // Compute max line width using layout runs
+                let text_width = temp_buffer
+                    .layout_runs()
+                    .map(|run| run.line_w)
+                    .fold(0.0, f32::max);
+
+                let new_width_pixels = text_width;
+                *w = f32::min(new_width_pixels / 90.0, 2.0);
+            }
+        }
 
         // Combine positions and types into NodeInstance entries
         let node_instance_buffer = vertex_buffer::create_node_instance_buffer(
@@ -540,18 +585,29 @@ impl State {
             let line_px = 12.0 * scale;
             let mut buf = GlyphBuffer::new(&mut font_system, Metrics::new(font_px, line_px));
             // per-label size (in physical pixels)
-            // TODO: update if we implement dynamic node size
-            let label_width = 90.0 * scale;
-            let label_height = match self.node_types[i] {
-                NodeType::DisjointWith => 62.0 * scale,
-                NodeType::ExternalClass
-                | NodeType::DeprecatedClass
-                | NodeType::EquivalentClass
-                | NodeType::InverseProperty => 48.0,
-                _ => 24.0,
-            } * scale;
+            let (label_width, label_height) = match self.node_shapes[i] {
+                NodeShape::Rectangle { w, .. } => {
+                    // Calculate physical pixel width from shape's width multiplier
+                    let height = match self.node_types[i] {
+                        NodeType::InverseProperty => 24.0,
+                        _ => 12.0,
+                    };
+                    (w * 90.0 * scale, height * scale)
+                }
+                NodeShape::Circle { .. } => {
+                    let height = match self.node_types[i] {
+                        NodeType::DisjointWith => 62.0,
+                        NodeType::ExternalClass
+                        | NodeType::DeprecatedClass
+                        | NodeType::EquivalentClass
+                        | NodeType::InverseProperty => 48.0,
+                        _ => 24.0,
+                    };
+                    (90.0 * scale, height * scale)
+                }
+            };
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
-            buf.set_wrap(&mut font_system, glyphon::Wrap::None);
+            buf.set_wrap(&mut font_system, glyphon::Wrap::Word);
             // sample label using the NodeType
             let attrs = &Attrs::new().family(Family::SansSerif);
             let node_type_metrics = Metrics::new(font_px - 3.0, line_px);
@@ -559,7 +615,7 @@ impl State {
             let spans = match self.node_types[i] {
                 NodeType::EquivalentClass => {
                     // TODO: Update when handling equivalent classes from ontology
-                    let mut labels: Vec<&str> = label.split('-').collect();
+                    let mut labels: Vec<&str> = label.split('\n').collect();
                     let label1 = labels.get(0).map_or("", |v| *v);
                     let eq_labels = labels.split_off(1);
                     let (last_label, eq_labels) = eq_labels.split_last().unwrap();
@@ -582,7 +638,7 @@ impl State {
                     combined_labels
                 }
                 NodeType::InverseProperty => {
-                    let mut labels: Vec<&str> = label.split('-').collect();
+                    let mut labels: Vec<&str> = label.split('\n').collect();
                     let mut label1 = labels.get(0).map_or("", |v| *v).to_string();
                     label1.push_str("\n\n\n");
                     let label2 = labels.get(1).map_or("", |v| *v);
@@ -735,7 +791,7 @@ impl State {
                 let left = node_x_px - label_w * 0.5;
 
                 let line_height = 8.0;
-                // top = distance-from-top-in-physical-pixels
+                // top = distance from top in physical pixels
                 let top = match self.node_types[i] {
                     NodeType::EquivalentClass => node_y_px - 2.0 * line_height,
                     _ => node_y_px - line_height,
@@ -789,20 +845,34 @@ impl State {
                             (radius_pix + 15.0) * r * scale,
                         ),
                         NodeShape::Rectangle { w, h } => {
-                            let mut scale = f32::INFINITY;
+                            let half_w_px = (w * 0.9 / 2.0) * radius_pix;
+                            let half_h_px = (h * 0.25 / 2.0) * radius_pix;
 
-                            if dir_x.abs() > 1e-6 {
-                                scale = scale.min((w * 0.9) / dir_x.abs());
-                            }
-                            if dir_y.abs() > 1e-6 {
-                                scale = scale.min((h * 0.25) / dir_y.abs());
-                            }
+                            let len = (dir_x * dir_x + dir_y * dir_y).sqrt().max(1.0);
+                            let nx = dir_x / len;
+                            let ny = dir_y / len;
 
-                            if !scale.is_finite() {
-                                (0.0, 0.0)
+                            // Compute intersection with rectangle perimeter in direction (nx, ny)
+                            let tx = if nx.abs() > 1e-6 {
+                                half_w_px / nx.abs()
                             } else {
-                                (w * scale * radius_pix, h * scale * radius_pix)
-                            }
+                                f32::INFINITY
+                            };
+                            let ty = if ny.abs() > 1e-6 {
+                                half_h_px / ny.abs()
+                            } else {
+                                f32::INFINITY
+                            };
+
+                            // Intersection distance is the smaller of the two
+                            let t = tx.min(ty);
+
+                            // Add padding to place the label away from the edge
+                            let padding = 45.0;
+                            let dist = t + padding;
+
+                            // Return the final scalar distance for both axes
+                            (dist, dist)
                         }
                     };
 
@@ -812,7 +882,7 @@ impl State {
                     let ny = dir_y / len;
 
                     // place label at end node plus offset along the center-->end angle
-                    let card_x_px = end_x_px + nx * (offset_px_x);
+                    let card_x_px = end_x_px + nx * offset_px_x;
                     let card_y_px = end_y_px + ny * offset_px_y;
 
                     // compute bounds from buffer size and center the label
