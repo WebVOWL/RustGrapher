@@ -1,5 +1,7 @@
 //! Ressources used by the graph simulator.
 
+use glam::Vec2;
+
 /// How strong nodes should push others away.
 #[derive(Default)]
 pub struct RepelForce(pub f32);
@@ -34,3 +36,32 @@ pub struct QuadTreeTheta(pub f32);
 /// Freeze nodes when their velocity falls below this number.
 #[derive(Default)]
 pub struct FreezeThreshold(pub f32);
+
+/// Simulation world size.
+pub struct WorldSize {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Default for WorldSize {
+    fn default() -> Self {
+        Self {
+            width: 1280,
+            height: 720,
+        }
+    }
+}
+
+/// The current location of the mouse cursor.
+#[derive(Default)]
+pub struct CursorPosition(pub Vec2);
+
+/// The entity ID of the node where the cursor position
+/// is within the circumference of said node.
+pub struct PointIntersection(pub i64);
+
+impl Default for PointIntersection {
+    fn default() -> Self {
+        Self(-1)
+    }
+}

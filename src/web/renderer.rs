@@ -1,10 +1,25 @@
 mod node_types;
 mod vertex_buffer;
 
+use crate::web::{
+    renderer::node_types::NodeType,
+    simulator::{Simulator, components::nodes::Position, ressources::events::SimulatorEvent},
+};
 use glam::Vec2;
+use glyphon::{
+    Attrs, Buffer as GlyphBuffer, BufferLine, Cache, Color, Family, FontSystem, Metrics,
+    Resolution, Shaping, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
+};
 use log::info;
+use specs::shrev::EventChannel;
+use specs::{Join, WorldExt};
 use std::{cmp::min, sync::Arc};
+use vertex_buffer::{NodeInstance, VERTICES, Vertex};
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
 use wgpu::{Face, util::DeviceExt};
+use winit::dpi::PhysicalPosition;
+use winit::event::MouseButton;
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::EventLoopExtWebSys;
 use winit::{
@@ -15,21 +30,7 @@ use winit::{
     window::Window,
 };
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
-use vertex_buffer::{NodeInstance, VERTICES, Vertex};
-
-use crate::web::simulator::Simulator;
-
-use crate::web::renderer::node_types::NodeType;
-
-use glyphon::{
-    Attrs, Buffer as GlyphBuffer, BufferLine, Cache, Color, Family, FontSystem, Metrics,
-    Resolution, Shaping, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
-};
-
-struct State {
+pub struct State {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -48,12 +49,19 @@ struct State {
     edge_pipeline: wgpu::RenderPipeline,
     edge_instance_buffer: wgpu::Buffer,
     num_edge_instances: u32,
+
     // Node and edge coordinates in pixels
     positions: Vec<[f32; 2]>,
     labels: Vec<String>,
     edges: Vec<[usize; 2]>,
     node_types: Vec<NodeType>,
     frame_count: u64, // TODO: Remove after implementing simulator
+    simulator: Simulator<'static, 'static>,
+    paused: bool,
+
+    // User input
+    cursor_position: Option<Vec2>,
+    node_dragged: bool,
 
     // Glyphon resources are initialized lazily when we have a non-zero surface.
     font_system: Option<FontSystem>,
@@ -63,7 +71,7 @@ struct State {
     text_renderer: Option<TextRenderer>,
     // one glyphon buffer per node containing its text (created when glyphon is initialized)
     text_buffers: Option<Vec<GlyphBuffer>>,
-    window: Arc<Window>,
+    pub window: Arc<Window>,
 }
 
 impl State {
@@ -303,8 +311,11 @@ impl State {
         let num_vertices = VERTICES.len() as u32;
 
         // TODO: remove test edges after adding simulator
-        let edges = [[0, 1]];
+        let edges: [[usize; 2]; 1] = [[0, 0]]; //[[0, 1], [0, 2]];
         let mut edge_positions: Vec<[[f32; 2]; 2]> = vec![];
+
+        // FIXME If we have 0 edges, wgpu explodes with "buffer slices can not be empty"
+
         for edge in edges {
             edge_positions.push([positions[edge[0]], positions[edge[1]]]);
         }
@@ -356,13 +367,16 @@ impl State {
             cache: None,
         });
 
-        let sim_nodes = vec![Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0)];
-        let sim_edges = vec![Vec2::new(0.0, 1.0)];
-        let mut simulator = Simulator::builder().build(sim_nodes, sim_edges);
-        for _ in 0..3 {
-            info!("Dispatch");
-            simulator.dispatcher.dispatch(&simulator.world);
+        let mut sim_nodes = Vec::with_capacity(positions.len());
+        for pos in positions {
+            sim_nodes.push(Vec2::new(pos[0], pos[1]));
         }
+
+        let mut sim_edges = Vec::with_capacity(edges.len());
+        for edge in edges {
+            sim_edges.push([edge[0].try_into().unwrap(), edge[1].try_into().unwrap()]);
+        }
+        let mut simulator = Simulator::builder().build(sim_nodes, sim_edges);
 
         // Glyphon: do not create heavy glyphon resources unless we have a non-zero surface.
         // Initialize them lazily below (or on first resize).
@@ -400,6 +414,10 @@ impl State {
             edges: edges.to_vec(),
             node_types: node_types.to_vec(),
             frame_count: 0,
+            simulator,
+            paused: false,
+            cursor_position: None,
+            node_dragged: false,
             font_system,
             swash_cache,
             viewport,
@@ -550,6 +568,11 @@ impl State {
             let data = [width as f32, height as f32, 0.0f32, 0.0f32];
             self.queue
                 .write_buffer(&self.resolution_buffer, 0, bytemuck::cast_slice(&data));
+
+            self.simulator.send_event(SimulatorEvent::WindowResized {
+                width: width,
+                height: height,
+            });
         }
     }
 
@@ -710,12 +733,21 @@ impl State {
         Ok(())
     }
 
-    fn update(&mut self) {
-        self.frame_count += 1;
-        let t = ((self.frame_count as f32) * 0.05).sin();
+    pub fn update(&mut self) {
+        if !self.paused {
+            self.simulator.tick();
+        }
 
-        // Update node positions
-        self.positions[1] = [self.positions[1][0], self.positions[1][1] + t];
+        let positions = self.simulator.world.read_storage::<Position>();
+        let entities = self.simulator.world.entities();
+        for (i, (_, position)) in (&entities, &positions).join().enumerate() {
+            self.positions[i] = [position.0.x, position.0.y];
+        }
+        // self.frame_count += 1;
+        // let t = ((self.frame_count as f32) * 0.05).sin();
+
+        // // Update node positions
+        // self.positions[1] = [self.positions[1][0], self.positions[1][1] + t];
 
         let nodes: Vec<NodeInstance> = self
             .positions
@@ -727,7 +759,7 @@ impl State {
             })
             .collect();
 
-        let mut edge_positions: Vec<[[f32; 2]; 2]> = vec![];
+        let mut edge_positions: Vec<[[f32; 2]; 2]> = Vec::with_capacity(self.edges.len());
         // Update edge endpoints from node positions
         for edge in &mut self.edges {
             edge_positions.push([self.positions[edge[0]], self.positions[edge[1]]]);
@@ -743,161 +775,53 @@ impl State {
             .write_buffer(&self.node_instance_buffer, 0, bytemuck::cast_slice(&nodes));
     }
 
-    fn handle_key(&self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
+    pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
         match (code, is_pressed) {
             (KeyCode::Escape, true) => event_loop.exit(),
+            (KeyCode::Space, true) => {
+                self.paused = !self.paused;
+                self.window.request_redraw();
+            }
             _ => {}
         }
     }
-}
+    pub fn handle_mouse_key(&mut self, button: MouseButton, is_pressed: bool) {
+        match (button, is_pressed) {
+            (MouseButton::Left, true) => {
+                // Begin node dragging on mouse click
+                // if !self.paused {
+                if let Some(pos) = self.cursor_position {
+                    self.node_dragged = true;
+                    self.simulator.send_event(SimulatorEvent::DragStart(pos));
 
-struct App {
-    #[cfg(target_arch = "wasm32")]
-    proxy: Option<winit::event_loop::EventLoopProxy<State>>,
-    state: Option<State>,
-}
-
-impl App {
-    pub fn new(#[cfg(target_arch = "wasm32")] event_loop: &EventLoop<State>) -> Self {
-        #[cfg(target_arch = "wasm32")]
-        let proxy = Some(event_loop.create_proxy());
-        Self {
-            state: None,
-            #[cfg(target_arch = "wasm32")]
-            proxy,
-        }
-    }
-}
-
-impl ApplicationHandler<State> for App {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        #[allow(unused_mut)]
-        let mut window_attributes = Window::default_attributes();
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            use wasm_bindgen::JsCast;
-            use web_sys::wasm_bindgen::UnwrapThrowExt;
-            use winit::platform::web::WindowAttributesExtWebSys;
-
-            const CANVAS_ID: &str = "canvas";
-
-            let window = web_sys::window().unwrap_throw();
-            let document = window.document().unwrap_throw();
-            let canvas = document.get_element_by_id(CANVAS_ID).unwrap_throw();
-            let html_canvas_element = canvas.unchecked_into();
-            window_attributes = window_attributes.with_canvas(Some(html_canvas_element));
-        }
-
-        let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            // Run the future asynchronously and use the
-            // proxy to send the results to the event loop
-            if let Some(proxy) = self.proxy.take() {
-                wasm_bindgen_futures::spawn_local(async move {
-                    assert!(
-                        proxy
-                            .send_event(
-                                State::new(window)
-                                    .await
-                                    .expect("Unable to create canvas!!!")
-                            )
-                            .is_ok()
-                    )
-                });
-            }
-        }
-    }
-
-    #[allow(unused_mut)]
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, mut event: State) {
-        // This is where proxy.send_event() ends up
-        #[cfg(target_arch = "wasm32")]
-        {
-            event.window.request_redraw();
-            event.resize(
-                event.window.inner_size().width,
-                event.window.inner_size().height,
-            );
-        }
-        self.state = Some(event);
-    }
-    fn window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        _window_id: winit::window::WindowId,
-        event: WindowEvent,
-    ) {
-        let state = match &mut self.state {
-            Some(canvas) => canvas,
-            None => return,
-        };
-
-        match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::Resized(size) => state.resize(size.width, size.height),
-            // WindowEvent::ScaleFactorChanged {
-            //     scale_factor,
-            //     inner_size_writer,
-            // } => {
-            //     state.resize(width, height);
-            // }
-            WindowEvent::RedrawRequested => {
-                state.update();
-                match state.render() {
-                    Ok(_) => {
-                        // Update frame count
-                        // self.dom.fps_counter.update();
-                    }
-                    // Reconfigure the surface if it's lost or outdated
-                    Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                        let size = state.window.inner_size();
-                        state.resize(size.width, size.height);
-                    }
-                    // The system is out of memory, we should probably quit
-                    Err(wgpu::SurfaceError::OutOfMemory) => {
-                        log::error!("Out of memory while rendering!");
-                        event_loop.exit();
-                    }
-                    Err(e) => {
-                        log::error!("Unable to render {}", e);
-                    }
+                    // self.simulator.drag_start(pos);
+                    // }
                 }
             }
-            WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
-                        physical_key: PhysicalKey::Code(code),
-                        state: key_state,
-                        ..
-                    },
-                ..
-            } => state.handle_key(event_loop, code, key_state.is_pressed()),
+            (MouseButton::Left, false) => {
+                // Stop node dragging on mouse release
+                // if !self.paused {
+                self.node_dragged = false;
+                self.simulator.send_event(SimulatorEvent::DragEnd);
+
+                // self.simulator.drag_end();
+                // }
+            }
+            (MouseButton::Right, false) => {
+                // Radial menu on mouse release
+            }
             _ => {}
         }
     }
-}
+    pub fn handle_cursor(&mut self, position: PhysicalPosition<f64>) {
+        // (x,y) coords in pixels relative to the top-left corner of the window
+        self.cursor_position = Some(Vec2::new(position.x as f32, position.y as f32));
+        if self.node_dragged {
+            if let Some(pos) = self.cursor_position {
+                self.simulator.send_event(SimulatorEvent::Dragged(pos));
 
-pub fn run() -> anyhow::Result<()> {
-    let event_loop = EventLoop::with_user_event().build()?;
-    let app = App::new(
-        #[cfg(target_arch = "wasm32")]
-        &event_loop,
-    );
-
-    #[cfg(target_arch = "wasm32")]
-    event_loop.spawn_app(app);
-
-    Ok(())
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(js_name = initRender)]
-pub fn init_render() -> Result<(), wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    run().unwrap_throw();
-
-    Ok(())
+                // self.simulator.dragging(pos);
+            }
+        }
+    }
 }

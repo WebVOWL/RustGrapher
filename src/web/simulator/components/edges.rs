@@ -2,12 +2,12 @@
 
 use specs::{Component, Entity, VecStorage};
 
-/// An edge connects exactly two nodes.
+/// Vector of edges from one source to (potentially) multiple targets.
+/// Source is implicitly the node from which this component is accessed.
 #[derive(Component)]
 #[storage(VecStorage)]
 pub struct Connects {
-    pub src: Entity,
-    pub target: Entity,
+    pub targets: Vec<Entity>,
 }
 
 // /// How strong the spring force of an edge should be.

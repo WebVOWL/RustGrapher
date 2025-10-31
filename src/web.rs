@@ -1,5 +1,6 @@
+mod app;
 mod quadtree;
 mod renderer;
 pub mod simulator;
 
-pub use renderer::init_render;
+pub use app::init_render;
