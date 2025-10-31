@@ -226,12 +226,13 @@ pub fn build_edge_instances(
             [0.0, 1.0] // opposite fallback to separate start/end a bit
         };
 
+        let perimeter_offset = 0.05;
         // Move start point to perimeter of its node
         if start_idx != center_idx {
             start = match start_shape {
                 NodeShape::Circle { r } => [
-                    start_center[0] + dir_start_n[0] * r * radius_pix,
-                    start_center[1] + dir_start_n[1] * r * radius_pix,
+                    start_center[0] + dir_start_n[0] * (r - perimeter_offset) * radius_pix,
+                    start_center[1] + dir_start_n[1] * (r - perimeter_offset) * radius_pix,
                 ],
                 NodeShape::Rectangle { w, h } => {
                     // Project ray onto rectangle perimeter
@@ -264,8 +265,8 @@ pub fn build_edge_instances(
         if end_idx != center_idx {
             end = match end_shape {
                 NodeShape::Circle { r } => [
-                    end_center[0] + dir_end_n[0] * r * radius_pix,
-                    end_center[1] + dir_end_n[1] * r * radius_pix,
+                    end_center[0] + dir_end_n[0] * (r - perimeter_offset) * radius_pix,
+                    end_center[1] + dir_end_n[1] * (r - perimeter_offset) * radius_pix,
                 ],
                 NodeShape::Rectangle { w, h } => {
                     let dx = dir_end_n[0];
