@@ -140,7 +140,6 @@ impl EdgeInstance {
 }
 
 pub fn build_edge_instances(
-    device: &wgpu::Device,
     edges: &[[usize; 3]],
     node_positions: &[[f32; 2]],
     node_shapes: &[NodeShape],
@@ -311,8 +310,7 @@ pub fn create_edge_instance_buffer(
     node_shapes: &[NodeShape],
     node_types: &[NodeType],
 ) -> wgpu::Buffer {
-    let edge_instances =
-        build_edge_instances(device, edges, node_positions, node_shapes, node_types);
+    let edge_instances = build_edge_instances(edges, node_positions, node_shapes, node_types);
 
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("edge_instance_buffer"),

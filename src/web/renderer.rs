@@ -180,7 +180,7 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // TODO: remove test code after adding simulator
+        // TODO: remove test code after implementing ontology loading
         let positions = [
             [50.0, 50.0],
             [250.0, 50.0],
@@ -211,7 +211,7 @@ impl State {
             String::from("My class"),
             String::from("Rdfs class"),
             String::from("Rdfs resource"),
-            String::from("Loooooooong class"),
+            String::from("Loooooooong class 1 2 3 4 5 6 7 8 9"),
             String::from("Thing"),
             String::from("Eq1\nEq2\nEq3"),
             String::from("Deprecated"),
@@ -281,8 +281,8 @@ impl State {
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
             NodeShape::Rectangle { w: 0.75, h: 1.0 },
-            NodeShape::Rectangle { w: 0.6, h: 0.8 },
-            NodeShape::Rectangle { w: 0.8, h: 0.8 },
+            NodeShape::Rectangle { w: 0.6, h: 1.0 },
+            NodeShape::Rectangle { w: 0.8, h: 1.0 },
             NodeShape::Rectangle { w: 0.8, h: 1.0 },
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
@@ -318,39 +318,105 @@ impl State {
         font_system.db_mut().set_sans_serif_family("DejaVu Sans");
 
         let mut node_shapes = node_shapes;
+        let mut labels = labels;
 
         // iterate over labels and update the width of corresponding rectangle nodes
-        for (i, label_text) in labels.iter().enumerate() {
+        for (i, label_text) in labels.clone().iter().enumerate() {
+            // Set fixed size for disjoint property
+            if let Some(NodeType::DisjointWith) = node_types.get(i) {
+                node_shapes[i] = NodeShape::Rectangle { w: 0.75, h: 0.75 };
+                continue;
+            }
             // check if the node is a rectangle and get a mutable reference to its properties
-            if let Some(NodeShape::Rectangle { w, .. }) = node_shapes.get_mut(i) {
-                if label_text.is_empty() {
-                    continue;
+            if label_text.is_empty() {
+                continue;
+            }
+
+            // temporary buffer to measure the text
+            let scale = window.scale_factor() as f32;
+            let mut temp_buffer =
+                glyphon::Buffer::new(&mut font_system, Metrics::new(12.0 * scale, 12.0 * scale));
+
+            temp_buffer.set_text(
+                &mut font_system,
+                &label_text,
+                &Attrs::new(),
+                Shaping::Advanced,
+            );
+
+            // Compute max line width using layout runs
+            let text_width = temp_buffer
+                .layout_runs()
+                .map(|run| run.line_w)
+                .fold(0.0, f32::max);
+
+            temp_buffer.shape_until_scroll(&mut font_system, false);
+            let mut capped_width = 90.0;
+            let mut max_lines = 0;
+            match node_shapes.get_mut(i) {
+                Some(NodeShape::Rectangle { w, .. }) => {
+                    let new_width_pixels = text_width;
+                    *w = f32::min(new_width_pixels / capped_width, 2.0);
+                    if matches!(node_types[i], NodeType::InverseProperty) {
+                        continue;
+                    }
+                    max_lines = 1;
+                    capped_width = 180.0;
+                }
+                Some(NodeShape::Circle { .. }) => {
+                    if matches!(node_types[i], NodeType::EquivalentClass) {
+                        continue;
+                    }
+                    // max 2 lines with ellipsis
+                    max_lines = 2;
+                }
+                None => {}
+            }
+            let mut current_text = label_text.clone();
+
+            temp_buffer.set_wrap(&mut font_system, glyphon::Wrap::Word);
+            temp_buffer.set_size(&mut font_system, Some(capped_width), None);
+
+            // Initial shape
+            temp_buffer.set_text(
+                &mut font_system,
+                &current_text,
+                &Attrs::new(),
+                Shaping::Advanced,
+            );
+            temp_buffer.shape_until_scroll(&mut font_system, false);
+
+            fn line_count(buffer: &glyphon::Buffer) -> usize {
+                buffer.layout_runs().count()
+            }
+
+            if line_count(&temp_buffer) > max_lines {
+                let mut low = 0;
+                let mut high = current_text.len();
+                let mut truncated = current_text.clone();
+
+                while low < high {
+                    let mid = (low + high) / 2;
+                    let candidate = format!("{}…", &current_text[..mid]);
+
+                    temp_buffer.set_text(
+                        &mut font_system,
+                        &candidate,
+                        &Attrs::new(),
+                        Shaping::Advanced,
+                    );
+                    temp_buffer.shape_until_scroll(&mut font_system, false);
+                    let lines = line_count(&temp_buffer);
+
+                    if lines > max_lines {
+                        high = mid;
+                    } else {
+                        truncated = candidate.clone();
+                        low = mid + 1;
+                    }
                 }
 
-                // temporary buffer to measure the text
-                let scale = window.scale_factor() as f32;
-                let mut temp_buffer = glyphon::Buffer::new(
-                    &mut font_system,
-                    Metrics::new(12.0 * scale, 12.0 * scale),
-                );
-
-                temp_buffer.set_text(
-                    &mut font_system,
-                    &label_text,
-                    &Attrs::new(),
-                    Shaping::Advanced,
-                );
-
-                temp_buffer.shape_until_scroll(&mut font_system, false);
-
-                // Compute max line width using layout runs
-                let text_width = temp_buffer
-                    .layout_runs()
-                    .map(|run| run.line_w)
-                    .fold(0.0, f32::max);
-
-                let new_width_pixels = text_width;
-                *w = f32::min(new_width_pixels / 90.0, 2.0);
+                labels[i] = truncated;
             }
         }
 
@@ -589,21 +655,19 @@ impl State {
                 NodeShape::Rectangle { w, .. } => {
                     // Calculate physical pixel width from shape's width multiplier
                     let height = match self.node_types[i] {
-                        NodeType::InverseProperty => 24.0,
+                        NodeType::InverseProperty => 48.0,
                         _ => 12.0,
                     };
-                    (w * 90.0 * scale, height * scale)
+                    (w * 85.0 * scale, height * scale)
                 }
                 NodeShape::Circle { .. } => {
                     let height = match self.node_types[i] {
-                        NodeType::DisjointWith => 62.0,
                         NodeType::ExternalClass
                         | NodeType::DeprecatedClass
-                        | NodeType::EquivalentClass
-                        | NodeType::InverseProperty => 48.0,
+                        | NodeType::EquivalentClass => 36.0,
                         _ => 24.0,
                     };
-                    (90.0 * scale, height * scale)
+                    (85.0 * scale, height * scale)
                 }
             };
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
@@ -638,7 +702,7 @@ impl State {
                     combined_labels
                 }
                 NodeType::InverseProperty => {
-                    let mut labels: Vec<&str> = label.split('\n').collect();
+                    let labels: Vec<&str> = label.split('\n').collect();
                     let mut label1 = labels.get(0).map_or("", |v| *v).to_string();
                     label1.push_str("\n\n\n");
                     let label2 = labels.get(1).map_or("", |v| *v);
@@ -1037,7 +1101,6 @@ impl State {
         );
 
         let edge_instances = vertex_buffer::build_edge_instances(
-            &self.device,
             &self.edges,
             &self.positions,
             &self.node_shapes,

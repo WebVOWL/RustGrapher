@@ -544,39 +544,33 @@ fn draw_rdfs_resource(v_uv: vec2<f32>) -> vec4<f32> {
 
 fn draw_datatype(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
     let rect_center = vec2<f32>(0.5, 0.5);
-    var rect_size = RECT_SCALE;
+    let rect_size = RECT_SCALE;
+    let border_thickness = BORDER_THICKNESS * 0.5; // controls visible border width
+    let edge_softness = EDGE_SOFTNESS * 0.5; // controls AA smoothness
 
     let fill_color = LITERAL_COLOR;
-    let border_thickness_rect = 0.02;
 
-    let p = v_uv - rect_center;
-
+    // Convert to local space relative to rectangle center
+    let p = abs(v_uv - rect_center);
     let half_size = 0.5 * rect_size;
 
-    let inside_x = abs(p.x) <= half_size.x;
-    let inside_y = abs(p.y) <= half_size.y;
+    // Signed distance to rectangle boundary (negative inside)
+    let dist = max(p.x - half_size.x, p.y - half_size.y);
 
-    let inside_rect = inside_x && inside_y;
+    // Smooth alpha mask for outer edge (anti-aliasing)
+    let outer_alpha = 1.0 - smoothstep(0.0, edge_softness, dist);
 
-    let inside_inner = abs(p.x) <= half_size.x - border_thickness_rect && abs(p.y) <= half_size.y - border_thickness_rect;
+    // Smooth mask for *inner border* (offset by thickness)
+    let inner_alpha = 1.0 - smoothstep(-border_thickness, -border_thickness + edge_softness, dist);
 
-    // mask selection
-    var fill_mask = 0.0;
-    if(inside_inner) {
-        fill_mask = 1.0;
-    }
-    var border_mask = 0.0;
-    if(inside_rect && !inside_inner) {
-        border_mask = 1.0;
-    }
+    // Border is the difference between outer and inner areas
+    let border_mask = outer_alpha - inner_alpha;
 
-    // composite
-    var col = BACKGROUND_COLOR;
-    col = mix(col, BORDER_COLOR, border_mask);
-    col = mix(col, fill_color, fill_mask);
+    // Blend background -> border -> fill
+    var col = mix(BACKGROUND_COLOR, BORDER_COLOR, border_mask);
+    col = mix(col, fill_color, inner_alpha);
 
-    let alpha = clamp(fill_mask + border_mask, 0.0, 1.0);
-
+    let alpha = clamp(outer_alpha, 0.0, 1.0);
     return vec4<f32>(col, alpha);
 }
 
