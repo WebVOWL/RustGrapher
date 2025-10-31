@@ -13,9 +13,10 @@ use glyphon::{
     Resolution, Shaping, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
 use log::info;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use specs::shrev::EventChannel;
 use specs::{Join, WorldExt};
-use std::{cmp::min, sync::Arc};
+use std::{cmp::min, collections::HashMap, sync::Arc};
 use vertex_buffer::{NodeInstance, VERTICES, Vertex};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -57,6 +58,7 @@ pub struct State {
     positions: Vec<[f32; 2]>,
     labels: Vec<String>,
     edges: Vec<[usize; 3]>,
+    solitary_edges: Vec<[usize; 3]>,
     node_types: Vec<NodeType>,
     node_shapes: Vec<NodeShape>,
     cardinalities: Vec<(u32, (String, Option<String>))>,
@@ -216,6 +218,8 @@ impl State {
             [950.0, 50.0],
             [550.0, 450.0],
             [575.0, 50.0],
+            [0.0, 0.0],
+            [0.0, 0.0],
         ];
         let labels = vec![
             String::from("My class"),
@@ -242,6 +246,8 @@ impl State {
             String::from("External"),
             String::from("Symmetric"),
             String::from("Property\nInverseProperty"),
+            String::new(),
+            String::new(),
         ];
 
         let node_types = [
@@ -269,6 +275,8 @@ impl State {
             NodeType::ExternalProperty,
             NodeType::ObjectProperty,
             NodeType::InverseProperty,
+            NodeType::NoDraw,
+            NodeType::NoDraw,
         ];
 
         let node_shapes = vec![
@@ -296,6 +304,8 @@ impl State {
             NodeShape::Rectangle { w: 0.8, h: 1.0 },
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
         ];
 
         let edges = [
@@ -303,10 +313,10 @@ impl State {
             [13, 15, 8],
             [8, 16, 13],
             [0, 17, 3],
-            [6, 18, 7],
+            [9, 18, 12],
             [1, 19, 2],
-            [10, 10, 11],
-            [11, 11, 12],
+            [10, 24, 11],
+            [11, 25, 12],
             [6, 20, 7],
             [6, 21, 7],
             [4, 22, 4],
@@ -568,14 +578,50 @@ impl State {
             cache: None,
         });
 
+        // Exclude properties without neighbors from simulator
+        let mut neighbor_map: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
+        for [start, center, end] in edges {
+            let mut neighbors = neighbor_map.get(&(start, end));
+            if neighbors.is_none() {
+                neighbors = neighbor_map.get(&(end, start));
+            };
+            match neighbors {
+                Some(cur_neighbors) => {
+                    let mut new_neighbors = cur_neighbors.clone();
+                    new_neighbors.push(center);
+                    neighbor_map.insert(
+                        (usize::min(start, end), usize::max(start, end)),
+                        new_neighbors,
+                    );
+                }
+                None => {
+                    neighbor_map.insert(
+                        (usize::min(start, end), usize::max(start, end)),
+                        vec![center],
+                    );
+                }
+            }
+        }
+        let mut solitary_edges: Vec<[usize; 3]> = vec![];
+        for [start, center, end] in edges {
+            let num_neighbors = neighbor_map
+                .get(&(usize::min(start, end), usize::max(start, end)))
+                .unwrap()
+                .len();
+            if num_neighbors < 2 {
+                solitary_edges.push([start, center, end]);
+            }
+        }
+
         let mut sim_nodes = Vec::with_capacity(positions.len());
-        for pos in positions {
+        for (i, pos) in positions.iter().enumerate() {
             sim_nodes.push(Vec2::new(pos[0], pos[1]));
         }
 
         let mut sim_edges = Vec::with_capacity(edges.len());
-        for edge in edges {
-            sim_edges.push([edge[0].try_into().unwrap(), edge[1].try_into().unwrap()]);
+        for [start, center, end] in edges {
+            sim_edges.push([start as u32, center as u32]);
+            sim_edges.push([center as u32, end as u32]);
         }
         let mut simulator = Simulator::builder().build(sim_nodes, sim_edges);
 
@@ -614,6 +660,7 @@ impl State {
             positions: positions.to_vec(),
             labels,
             edges: edges.to_vec(),
+            solitary_edges,
             node_types: node_types.to_vec(),
             node_shapes,
             cardinalities,
@@ -1125,6 +1172,25 @@ impl State {
         let entities = self.simulator.world.entities();
         for (i, (_, position)) in (&entities, &positions).join().enumerate() {
             self.positions[i] = [position.0.x, position.0.y];
+        }
+
+        // &self
+        //     .solitary_edges
+        //     .par_iter()
+        //     .for_each(|[start, center, end]| {
+        //         if !(*start == *end) {
+        //             let center_x = (self.positions[*start][0] + self.positions[*end][0]) / 2.0;
+        //             let center_y = (self.positions[*start][1] + self.positions[*end][1]) / 2.0;
+        //             self.positions[*center] = [center_x, center_y];
+        //         }
+        //     });
+        for [start, center, end] in &self.solitary_edges {
+            if *start == *end {
+                continue;
+            }
+            let center_x = (self.positions[*start][0] + self.positions[*end][0]) / 2.0;
+            let center_y = (self.positions[*start][1] + self.positions[*end][1]) / 2.0;
+            self.positions[*center] = [center_x, center_y];
         }
 
         let node_instances = vertex_buffer::build_node_instances(

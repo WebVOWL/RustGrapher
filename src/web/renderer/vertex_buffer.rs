@@ -226,7 +226,7 @@ pub fn build_edge_instances(
             [0.0, 1.0] // opposite fallback to separate start/end a bit
         };
 
-        let perimeter_offset = 0.05;
+        let perimeter_offset = 0.025;
         // Move start point to perimeter of its node
         if start_idx != center_idx {
             start = match start_shape {
