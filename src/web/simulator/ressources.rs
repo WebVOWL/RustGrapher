@@ -1,2 +1,2 @@
-pub mod event_channels;
+pub mod events;
 pub mod simulator_vars;

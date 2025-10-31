@@ -28,3 +28,8 @@ impl Default for Mass {
 #[derive(Component, Default)]
 #[storage(NullStorage)]
 pub struct Fixed;
+
+/// A dragged node has extra force applied to it
+#[derive(Component, Default)]
+#[storage(NullStorage)]
+pub struct Dragged;
