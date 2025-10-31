@@ -1,4 +1,7 @@
-#[derive(Copy, Clone, Debug)]
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
+
+#[derive(Copy, Clone, Debug, EnumIter)]
 pub enum NodeType {
     Class,
     ExternalClass,

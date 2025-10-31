@@ -14,6 +14,7 @@ use log::info;
 use specs::shrev::EventChannel;
 use specs::{Join, WorldExt};
 use std::{cmp::min, sync::Arc};
+use strum::IntoEnumIterator;
 use vertex_buffer::{NodeInstance, VERTICES, Vertex};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -185,52 +186,17 @@ impl State {
         });
 
         // TODO: remove test code after adding simulator
-        let positions = [
-            [50.0, 50.0],
-            [250.0, 50.0],
-            [450.0, 50.0],
-            [250.0, 250.0],
-            [450.0, 450.0],
-            [650.0, 50.0],
-            [850.0, 50.0],
-            [1050.0, 50.0],
-            [1250.0, 50.0],
-            [450.0, 250.0],
-            [650.0, 250.0],
-            [850.0, 250.0],
-            [1050.0, 250.0],
-        ];
-        let labels = vec![
-            String::from("My class"),
-            String::from("Rdfs class"),
-            String::from("Rdfs resource"),
-            String::from("Loooooooong class"),
-            String::from("Thing"),
-            String::from("Eq1-Eq2-Eq3"),
-            String::from("Deprecated"),
-            String::new(),
-            String::from("Literal"),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-        ];
-
-        let node_types = [
-            NodeType::Class,
-            NodeType::RdfsClass,
-            NodeType::RdfsResource,
-            NodeType::ExternalClass,
-            NodeType::Thing,
-            NodeType::EquivalentClass,
-            NodeType::DeprecatedClass,
-            NodeType::AnonymousClass,
-            NodeType::Literal,
-            NodeType::Complement,
-            NodeType::DisjointUnion,
-            NodeType::Intersection,
-            NodeType::Union,
-        ];
+        const SIZE: i64 = 10e2 as i64;
+        const USIZE: usize = SIZE as usize;
+        let mut positions: Vec<[f32; 2]> = Vec::with_capacity(USIZE);
+        let mut labels = Vec::with_capacity(USIZE);
+        let mut node_types: Vec<NodeType> = Vec::with_capacity(USIZE);
+        let mut node_iter = NodeType::iter().cycle();
+        for i in 0..SIZE {
+            positions.push([(i % 1000) as f32, (i % 1000) as f32]);
+            // labels.push(format!("Class {i}"));
+            node_types.push(node_iter.next().unwrap());
+        }
 
         // Combine positions and types into NodeInstance entries
 
@@ -368,7 +334,7 @@ impl State {
         });
 
         let mut sim_nodes = Vec::with_capacity(positions.len());
-        for pos in positions {
+        for pos in &positions {
             sim_nodes.push(Vec2::new(pos[0], pos[1]));
         }
 
@@ -409,7 +375,7 @@ impl State {
             edge_pipeline,
             edge_instance_buffer,
             num_edge_instances,
-            positions: positions.to_vec(),
+            positions: positions, //.to_vec(),
             labels,
             edges: edges.to_vec(),
             node_types: node_types.to_vec(),
