@@ -216,12 +216,12 @@ impl State {
             String::from("Eq1\nEq2\nEq3"),
             String::from("Deprecated"),
             String::new(),
-            String::from("Loooooooong Literal"),
+            String::from("Literal"),
+            String::new(),
+            String::from("DisjointUnion 1 2 3 4 5 6 7 8 9"),
             String::new(),
             String::new(),
-            String::new(),
-            String::new(),
-            String::from("This Datatype is very loooooooooong"),
+            String::from("This Datatype is very long"),
             String::from("AllValues"),
             String::from("Property1"),
             String::from("Property2"),
@@ -363,13 +363,17 @@ impl State {
                     max_lines = 1;
                     capped_width = 180.0;
                 }
-                Some(NodeShape::Circle { .. }) => {
-                    if matches!(node_types[i], NodeType::EquivalentClass) {
-                        continue;
+                Some(NodeShape::Circle { .. }) => match node_types[i] {
+                    NodeType::EquivalentClass => continue,
+                    NodeType::Complement
+                    | NodeType::DisjointUnion
+                    | NodeType::Union
+                    | NodeType::Intersection => {
+                        max_lines = 1;
+                        capped_width = 80.0;
                     }
-                    // max 2 lines with ellipsis
-                    max_lines = 2;
-                }
+                    _ => max_lines = 2,
+                },
                 None => {}
             }
             let mut current_text = label_text.clone();
@@ -664,10 +668,22 @@ impl State {
                     let height = match self.node_types[i] {
                         NodeType::ExternalClass
                         | NodeType::DeprecatedClass
-                        | NodeType::EquivalentClass => 36.0,
+                        | NodeType::EquivalentClass
+                        | NodeType::DisjointWith
+                        | NodeType::Union
+                        | NodeType::DisjointUnion
+                        | NodeType::Complement
+                        | NodeType::Intersection => 36.0,
                         _ => 24.0,
                     };
-                    (85.0 * scale, height * scale)
+                    let width = match self.node_types[i] {
+                        NodeType::Union
+                        | NodeType::DisjointUnion
+                        | NodeType::Complement
+                        | NodeType::Intersection => 75.0,
+                        _ => 85.0,
+                    };
+                    (width * scale, height * scale)
                 }
             };
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
@@ -727,10 +743,16 @@ impl State {
                     ("\n\n(disjoint)", attrs.clone().metrics(node_type_metrics)),
                 ],
                 NodeType::Thing => vec![("Thing", attrs.clone())],
-                NodeType::Complement => vec![("¬", attrs.clone())],
-                NodeType::DisjointUnion => vec![("1", attrs.clone())],
-                NodeType::Intersection => vec![("∩", attrs.clone())],
-                NodeType::Union => vec![("∪", attrs.clone())],
+                NodeType::Complement => {
+                    vec![(label.as_str(), attrs.clone()), ("\n\n¬", attrs.clone())]
+                }
+                NodeType::DisjointUnion => {
+                    vec![(label.as_str(), attrs.clone()), ("\n\n1", attrs.clone())]
+                }
+                NodeType::Intersection => {
+                    vec![(label.as_str(), attrs.clone()), ("\n\n∩", attrs.clone())]
+                }
+                NodeType::Union => vec![(label.as_str(), attrs.clone()), ("\n\n∪", attrs.clone())],
                 NodeType::SubclassOf => vec![("Subclass of", attrs.clone())],
                 _ => vec![(label.as_str(), attrs.clone())],
             };
@@ -838,6 +860,14 @@ impl State {
                     NodeType::InverseProperty => {
                         let position_x = self.positions[i][0];
                         let position_y = self.positions[i][1] + 18.0;
+                        [position_x, position_y]
+                    }
+                    NodeType::Complement
+                    | NodeType::DisjointUnion
+                    | NodeType::Union
+                    | NodeType::Intersection => {
+                        let position_x = self.positions[i][0];
+                        let position_y = self.positions[i][1] + 24.0;
                         [position_x, position_y]
                     }
                     _ => self.positions[i],
