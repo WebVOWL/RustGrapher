@@ -281,7 +281,12 @@ impl SimulatorBuilder {
     }
 
     /// Constructs a instance of `Simulator`
-    pub fn build<'a, 'b>(self, nodes: Vec<Vec2>, edges: Vec<[u32; 2]>) -> Simulator<'a, 'b> {
+    pub fn build<'a, 'b>(
+        self,
+        nodes: Vec<Vec2>,
+        edges: Vec<[u32; 2]>,
+        sizes: Vec<f32>,
+    ) -> Simulator<'a, 'b> {
         let mut world = World::new();
         let mut dispatcher = DispatcherBuilder::new()
             .with(QuadTreeConstructor, "quadtree_constructor", &[])
@@ -313,7 +318,7 @@ impl SimulatorBuilder {
             .build();
 
         dispatcher.setup(&mut world);
-        Self::create_entities(&mut world, nodes, edges);
+        Self::create_entities(&mut world, nodes, edges, sizes);
         self.add_ressources(&mut world);
 
         let mut event_channel = EventChannel::<SimulatorEvent>::new();
@@ -341,16 +346,16 @@ impl SimulatorBuilder {
         world.insert(PointIntersection::default());
     }
 
-    fn create_entities(world: &mut World, nodes: Vec<Vec2>, edges: Vec<[u32; 2]>) {
+    fn create_entities(world: &mut World, nodes: Vec<Vec2>, edges: Vec<[u32; 2]>, sizes: Vec<f32>) {
         let mut node_entities = Vec::with_capacity(nodes.len());
 
         // Create node entities
-        for node in nodes {
+        for (i, node) in nodes.iter().enumerate() {
             let node_entity = world
                 .create_entity()
-                .with(Position(node))
+                .with(Position(*node))
                 .with(Velocity::default())
-                .with(Mass::default())
+                .with(Mass(sizes[i]))
                 .with(NodeForces::default())
                 .build();
             node_entities.push(node_entity);
@@ -387,10 +392,10 @@ impl Default for SimulatorBuilder {
             spring_stiffness: 300.0,
             spring_neutral_length: 70.0,
             gravity_force: 30.0,
-            delta_time: 0.005,
+            delta_time: 0.01,
             damping: 0.8,
             quadtree_theta: 0.0,
-            freeze_thresh: 10.0,
+            freeze_thresh: 0.0,
         }
     }
 }

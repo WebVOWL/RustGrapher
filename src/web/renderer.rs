@@ -626,7 +626,16 @@ impl State {
             sim_edges.push([start as u32, center as u32]);
             sim_edges.push([center as u32, end as u32]);
         }
-        let mut simulator = Simulator::builder().build(sim_nodes, sim_edges);
+
+        let mut sim_sizes = Vec::with_capacity(positions.len());
+        for node_shape in node_shapes.clone() {
+            match node_shape {
+                NodeShape::Circle { r } => sim_sizes.push(r),
+                NodeShape::Rectangle { w, .. } => sim_sizes.push(w),
+            }
+        }
+
+        let mut simulator = Simulator::builder().build(sim_nodes, sim_edges, sim_sizes);
 
         // Glyphon: do not create heavy glyphon resources unless we have a non-zero surface.
         // Initialize them lazily below (or on first resize).
