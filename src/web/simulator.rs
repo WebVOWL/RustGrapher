@@ -194,7 +194,7 @@ impl SimulatorBuilder {
 
     /// How strong the spring force should be.
     ///
-    /// Default: `100.0`
+    /// Default: `300.0`
     pub fn spring_stiffness(mut self, spring_stiffness: f32) -> Self {
         self.spring_stiffness = spring_stiffness;
         self
@@ -207,7 +207,7 @@ impl SimulatorBuilder {
     ///
     /// Set to `0` if edges should always pull apart.
     ///
-    /// Default: `2.0`
+    /// Default: `70.0`
     pub fn spring_neutral_length(mut self, neutral_length: f32) -> Self {
         self.spring_neutral_length = neutral_length;
         self
@@ -215,7 +215,7 @@ impl SimulatorBuilder {
 
     /// How strong the pull to the center should be.
     ///
-    /// Default: `1.0`
+    /// Default: `30.0`
     pub fn gravity_force(mut self, gravity_force: f32) -> Self {
         self.gravity_force = gravity_force;
         self
@@ -223,7 +223,7 @@ impl SimulatorBuilder {
 
     /// How strong nodes should push others away.
     ///
-    /// Default: `100.0`
+    /// Default: `10e7`
     pub fn repel_force(mut self, repel_force_const: f32) -> Self {
         self.repel_force = repel_force_const;
         self
@@ -235,7 +235,7 @@ impl SimulatorBuilder {
     ///
     /// `0.0` -> No Movement
     ///
-    /// Default: `0.9`
+    /// Default: `0.8`
     pub fn damping(mut self, damping: f32) -> Self {
         self.damping = damping;
         self
@@ -257,7 +257,7 @@ impl SimulatorBuilder {
     /// Freeze nodes when their velocity falls below `freeze_thresh`.
     /// Set to `-1` to disable
     ///
-    /// Default: `1e-2`
+    /// Default: `10.0`
     pub fn freeze_threshold(mut self, freeze_thresh: f32) -> Self {
         self.freeze_thresh = freeze_thresh;
         self
