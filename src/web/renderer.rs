@@ -283,7 +283,7 @@ impl State {
             NodeShape::Circle { r: 1.0 },
             NodeShape::Circle { r: 1.0 },
             NodeShape::Circle { r: 1.0 },
-            NodeShape::Circle { r: 1.0 },
+            NodeShape::Circle { r: 1.25 },
             NodeShape::Circle { r: 0.8 },
             NodeShape::Circle { r: 1.2 },
             NodeShape::Circle { r: 1.1 },
@@ -371,19 +371,19 @@ impl State {
                 .fold(0.0, f32::max);
 
             temp_buffer.shape_until_scroll(&mut font_system, false);
-            let mut capped_width = 90.0;
+            let mut capped_width = 45.0;
             let mut max_lines = 0;
             match node_shapes.get_mut(i) {
                 Some(NodeShape::Rectangle { w, .. }) => {
                     let new_width_pixels = text_width;
-                    *w = f32::min(new_width_pixels / capped_width, 2.0);
+                    *w = f32::min(new_width_pixels / (capped_width * 2.0), 2.0);
                     if matches!(node_types[i], NodeType::InverseProperty) {
                         continue;
                     }
                     max_lines = 1;
-                    capped_width = 180.0;
+                    capped_width *= 4.0;
                 }
-                Some(NodeShape::Circle { .. }) => match node_types[i] {
+                Some(NodeShape::Circle { r }) => match node_types[i] {
                     NodeType::EquivalentClass => continue,
                     NodeType::Complement
                     | NodeType::DisjointUnion
@@ -392,7 +392,10 @@ impl State {
                         max_lines = 1;
                         capped_width = 80.0;
                     }
-                    _ => max_lines = 2,
+                    _ => {
+                        max_lines = 2;
+                        capped_width *= *r * 2.0;
+                    }
                 },
                 None => {}
             }
@@ -728,7 +731,7 @@ impl State {
                     };
                     (w * 85.0 * scale, height * scale)
                 }
-                NodeShape::Circle { .. } => {
+                NodeShape::Circle { r } => {
                     let height = match self.node_types[i] {
                         NodeType::ExternalClass
                         | NodeType::DeprecatedClass
@@ -747,7 +750,7 @@ impl State {
                         | NodeType::Intersection => 75.0,
                         _ => 85.0,
                     };
-                    (width * scale, height * scale)
+                    (width * scale * r, height * scale)
                 }
             };
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
@@ -1174,16 +1177,6 @@ impl State {
             self.positions[i] = [position.0.x, position.0.y];
         }
 
-        // &self
-        //     .solitary_edges
-        //     .par_iter()
-        //     .for_each(|[start, center, end]| {
-        //         if !(*start == *end) {
-        //             let center_x = (self.positions[*start][0] + self.positions[*end][0]) / 2.0;
-        //             let center_y = (self.positions[*start][1] + self.positions[*end][1]) / 2.0;
-        //             self.positions[*center] = [center_x, center_y];
-        //         }
-        //     });
         for [start, center, end] in &self.solitary_edges {
             if *start == *end {
                 continue;
