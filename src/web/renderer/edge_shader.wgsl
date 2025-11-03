@@ -140,6 +140,15 @@ fn tri_area(a: vec2<f32>, b: vec2<f32>, c: vec2<f32>) -> f32 {
     return abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) * 0.5;
 }
 
+// Distance from point to line segment
+fn point_to_segment_dist(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+    let ab = b - a;
+    let ap = p - a;
+    let t = clamp(dot(ap, ab) / dot(ab, ab), 0.0, 1.0);
+    let closest = a + ab * t;
+    return length(p - closest);
+}
+
 @fragment
 fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     let px = mix(in.v_mbr_min, in.v_mbr_max, in.v_uv);
@@ -249,7 +258,7 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     }
 
     // Compute if inside arrow
-    let inside_arrow = arrow_alpha > 0.0;
+    var inside_arrow = arrow_alpha > 0.0;
 
     // If line_type == 1 -> make arrow white with black border
     if (in.v_line_type == 1u && inside_arrow) {
@@ -269,37 +278,57 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
         arrow_color = mix(vec3<f32>(0.0), vec3<f32>(1.0), border_smooth);
     } else if (in.v_line_type == 4u) {
         // White diamond with black border
-
-        // Diamond center slightly before the tip
-        let diamond_center = tip - dir * (ARROW_WIDTH_PX * 0.25);
-        let perp = vec2<f32>(-dir.y, dir.x);
-
-        // Diamond half-size
-        let half_size = ARROW_WIDTH_PX * 0.5;
-
-        // Local coordinates in rotated frame
-        let local = vec2<f32>(
-            dot(px - diamond_center, dir),
-            dot(px - diamond_center, perp)
-        );
-
-        // Signed distance to a diamond (|x| + |y| = size)
-        let dist_diamond = abs(local.x) + abs(local.y) - half_size;
-
-        // Smooth anti-aliased edge
-        let fill = 1.0 - smoothstep(0.0, ARROW_AA, dist_diamond);
-
-        // Border thickness in pixels
-        let edge_thickness = 2.0;
-
-        // Border mask: inner region shrunk by edge_thickness
-        let dist_inner = abs(local.x) + abs(local.y) - (half_size - edge_thickness);
-        let inner = 1.0 - smoothstep(0.0, ARROW_AA, dist_inner);
-
-        // Black border, white fill
-        let border_mask = clamp(fill - inner, 0.0, 1.0);
-        arrow_color = mix(vec3<f32>(1.0), vec3<f32>(0.0), border_mask);
-        arrow_alpha = fill;
+        let diamond_width_px = ARROW_WIDTH_PX + 5.0;
+        let diamond_length_px = ARROW_LENGTH_PX * 2.0;
+        
+        // Diamond has 4 vertices: tip (front), left, right, and back
+        let diamond_tip = tip;
+        let diamond_center = tip - dir * diamond_length_px * 0.5;
+        let diamond_back = tip - dir * diamond_length_px;
+        let perp_d = vec2<f32>(-dir.y, dir.x);
+        let diamond_left = diamond_center + perp_d * diamond_width_px * 0.5;
+        let diamond_right = diamond_center - perp_d * diamond_width_px * 0.5;
+        
+        // Check if inside diamond by testing two triangles
+        // Triangle 1: tip, left, right (front half)
+        let area1_total = tri_area(diamond_tip, diamond_left, diamond_right);
+        let area1_sub = tri_area(px, diamond_left, diamond_right) + 
+                        tri_area(diamond_tip, px, diamond_right) + 
+                        tri_area(diamond_tip, diamond_left, px);
+        let area1_diff = abs(area1_sub - area1_total);
+        
+        // Triangle 2: back, left, right (back half)
+        let area2_total = tri_area(diamond_back, diamond_left, diamond_right);
+        let area2_sub = tri_area(px, diamond_left, diamond_right) + 
+                        tri_area(diamond_back, px, diamond_right) + 
+                        tri_area(diamond_back, diamond_left, px);
+        let area2_diff = abs(area2_sub - area2_total);
+        
+        var diamond_alpha = 0.0;
+        if (area1_total > 1e-5) {
+            let norm_diff1 = area1_diff / area1_total;
+            diamond_alpha = max(diamond_alpha, 1.0 - smoothstep(0.0, ARROW_AA, norm_diff1));
+        }
+        if (area2_total > 1e-5) {
+            let norm_diff2 = area2_diff / area2_total;
+            diamond_alpha = max(diamond_alpha, 1.0 - smoothstep(0.0, ARROW_AA, norm_diff2));
+        }
+        
+        if (diamond_alpha > 0.0) {
+            // Calculate distance to nearest edge for border effect
+            let dist1 = point_to_segment_dist(px, diamond_tip, diamond_left);
+            let dist2 = point_to_segment_dist(px, diamond_tip, diamond_right);
+            let dist3 = point_to_segment_dist(px, diamond_left, diamond_back);
+            let dist4 = point_to_segment_dist(px, diamond_right, diamond_back);
+            
+            let min_edge_dist = min(min(dist1, dist2), min(dist3, dist4));
+            
+            let edge_thickness = 2.0;
+            let border_smooth = smoothstep(0.0, edge_thickness, min_edge_dist);
+            arrow_color = mix(vec3<f32>(0.0), vec3<f32>(1.0), border_smooth);
+            arrow_alpha = diamond_alpha;
+            inside_arrow = true;
+        }
     }
 
     // Blend between arrow and line colors
