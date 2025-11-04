@@ -1,7 +1,9 @@
+mod node_shape;
 mod node_types;
 mod vertex_buffer;
 
 use crate::web::{
+    renderer::node_shape::NodeShape,
     renderer::node_types::NodeType,
     simulator::{Simulator, components::nodes::Position, ressources::events::SimulatorEvent},
 };
@@ -11,9 +13,10 @@ use glyphon::{
     Resolution, Shaping, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
 use log::info;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use specs::shrev::EventChannel;
 use specs::{Join, WorldExt};
-use std::{cmp::min, sync::Arc};
+use std::{cmp::min, collections::HashMap, sync::Arc};
 use vertex_buffer::{NodeInstance, VERTICES, Vertex};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -31,6 +34,7 @@ use winit::{
 };
 
 pub struct State {
+    #[cfg(target_arch = "wasm32")]
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -53,8 +57,11 @@ pub struct State {
     // Node and edge coordinates in pixels
     positions: Vec<[f32; 2]>,
     labels: Vec<String>,
-    edges: Vec<[usize; 2]>,
+    edges: Vec<[usize; 3]>,
+    solitary_edges: Vec<[usize; 3]>,
     node_types: Vec<NodeType>,
+    node_shapes: Vec<NodeShape>,
+    cardinalities: Vec<(u32, (String, Option<String>))>,
     frame_count: u64, // TODO: Remove after implementing simulator
     simulator: Simulator<'static, 'static>,
     paused: bool,
@@ -71,6 +78,7 @@ pub struct State {
     text_renderer: Option<TextRenderer>,
     // one glyphon buffer per node containing its text (created when glyphon is initialized)
     text_buffers: Option<Vec<GlyphBuffer>>,
+    cardinality_text_buffers: Option<Vec<(usize, GlyphBuffer)>>,
     pub window: Arc<Window>,
 }
 
@@ -184,34 +192,60 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // TODO: remove test code after adding simulator
+        // TODO: remove test code after implementing ontology loading
         let positions = [
             [50.0, 50.0],
             [250.0, 50.0],
             [450.0, 50.0],
             [250.0, 250.0],
-            [450.0, 450.0],
-            [650.0, 50.0],
+            [650.0, 450.0],
+            [700.0, 50.0],
             [850.0, 50.0],
             [1050.0, 50.0],
-            [1250.0, 50.0],
+            [1050.0, 250.0],
             [450.0, 250.0],
             [650.0, 250.0],
             [850.0, 250.0],
-            [1050.0, 250.0],
+            [850.0, 450.0],
+            [1250.0, 250.0],
+            [50.0, 500.0],
+            [1250.0, 150.0],
+            [1250.0, 350.0],
+            [150.0, 150.0],
+            [950.0, 100.0],
+            [350.0, 50.0],
+            [950.0, 25.0],
+            [950.0, 50.0],
+            [550.0, 450.0],
+            [575.0, 50.0],
+            [0.0, 0.0],
+            [0.0, 0.0],
         ];
         let labels = vec![
             String::from("My class"),
             String::from("Rdfs class"),
             String::from("Rdfs resource"),
-            String::from("Loooooooong class"),
+            String::from("Loooooooong class 1 2 3 4 5 6 7 8 9"),
             String::from("Thing"),
-            String::from("Eq1-Eq2-Eq3"),
+            String::from("Eq1\nEq2\nEq3"),
             String::from("Deprecated"),
             String::new(),
             String::from("Literal"),
             String::new(),
+            String::from("DisjointUnion 1 2 3 4 5 6 7 8 9"),
             String::new(),
+            String::new(),
+            String::from("This Datatype is very long"),
+            String::from("AllValues"),
+            String::from("Property1"),
+            String::from("Property2"),
+            String::new(),
+            String::new(),
+            String::from("is a"),
+            String::from("Deprecated"),
+            String::from("External"),
+            String::from("Symmetric"),
+            String::from("Property\nInverseProperty"),
             String::new(),
             String::new(),
         ];
@@ -230,12 +264,196 @@ impl State {
             NodeType::DisjointUnion,
             NodeType::Intersection,
             NodeType::Union,
+            NodeType::Datatype,
+            NodeType::ValuesFrom,
+            NodeType::DatatypeProperty,
+            NodeType::DatatypeProperty,
+            NodeType::SubclassOf,
+            NodeType::DisjointWith,
+            NodeType::RdfProperty,
+            NodeType::DeprecatedProperty,
+            NodeType::ExternalProperty,
+            NodeType::ObjectProperty,
+            NodeType::InverseProperty,
+            NodeType::NoDraw,
+            NodeType::NoDraw,
         ];
 
-        // Combine positions and types into NodeInstance entries
+        let node_shapes = vec![
+            NodeShape::Circle { r: 1.0 },
+            NodeShape::Circle { r: 1.0 },
+            NodeShape::Circle { r: 1.0 },
+            NodeShape::Circle { r: 1.25 },
+            NodeShape::Circle { r: 0.8 },
+            NodeShape::Circle { r: 1.2 },
+            NodeShape::Circle { r: 1.1 },
+            NodeShape::Circle { r: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Circle { r: 1.0 },
+            NodeShape::Circle { r: 1.0 },
+            NodeShape::Circle { r: 1.0 },
+            NodeShape::Circle { r: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Rectangle { w: 0.75, h: 1.0 },
+            NodeShape::Rectangle { w: 0.6, h: 1.0 },
+            NodeShape::Rectangle { w: 0.8, h: 1.0 },
+            NodeShape::Rectangle { w: 0.8, h: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
+            NodeShape::Rectangle { w: 1.0, h: 1.0 },
+        ];
 
-        let node_instance_buffer =
-            vertex_buffer::create_node_instance_buffer(&device, &positions, &node_types);
+        let edges = [
+            [0, 14, 1],
+            [13, 15, 8],
+            [8, 16, 13],
+            [0, 17, 3],
+            [9, 18, 12],
+            [1, 19, 2],
+            [10, 24, 11],
+            [11, 25, 12],
+            [6, 20, 7],
+            [6, 21, 7],
+            [4, 22, 4],
+            [2, 23, 5],
+        ];
+
+        let cardinalities: Vec<(u32, (String, Option<String>))> = vec![
+            (0, ("∀".to_string(), None)),
+            (8, ("1".to_string(), None)),
+            (1, ("1".to_string(), Some("10".to_string()))),
+            (10, ("5".to_string(), Some("10".to_string()))),
+        ];
+
+        // FontSystem instance for text measurement
+        let mut font_system =
+            FontSystem::new_with_fonts(core::iter::once(glyphon::fontdb::Source::Binary(
+                Arc::new(include_bytes!("../../assets/DejaVuSans.ttf").to_vec()),
+            )));
+        font_system.db_mut().set_sans_serif_family("DejaVu Sans");
+
+        let mut node_shapes = node_shapes;
+        let mut labels = labels;
+
+        // iterate over labels and update the width of corresponding rectangle nodes
+        for (i, label_text) in labels.clone().iter().enumerate() {
+            // Set fixed size for disjoint property
+            if let Some(NodeType::DisjointWith) = node_types.get(i) {
+                node_shapes[i] = NodeShape::Rectangle { w: 0.75, h: 0.75 };
+                continue;
+            }
+            // check if the node is a rectangle and get a mutable reference to its properties
+            if label_text.is_empty() {
+                continue;
+            }
+
+            // temporary buffer to measure the text
+            let scale = window.scale_factor() as f32;
+            let mut temp_buffer =
+                glyphon::Buffer::new(&mut font_system, Metrics::new(12.0 * scale, 12.0 * scale));
+
+            temp_buffer.set_text(
+                &mut font_system,
+                &label_text,
+                &Attrs::new(),
+                Shaping::Advanced,
+            );
+
+            // Compute max line width using layout runs
+            let text_width = temp_buffer
+                .layout_runs()
+                .map(|run| run.line_w)
+                .fold(0.0, f32::max);
+
+            temp_buffer.shape_until_scroll(&mut font_system, false);
+            let mut capped_width = 45.0;
+            let mut max_lines = 0;
+            match node_shapes.get_mut(i) {
+                Some(NodeShape::Rectangle { w, .. }) => {
+                    let new_width_pixels = text_width;
+                    *w = f32::min(new_width_pixels / (capped_width * 2.0), 2.0);
+                    if matches!(node_types[i], NodeType::InverseProperty) {
+                        continue;
+                    }
+                    max_lines = 1;
+                    capped_width *= 4.0;
+                }
+                Some(NodeShape::Circle { r }) => match node_types[i] {
+                    NodeType::EquivalentClass => continue,
+                    NodeType::Complement
+                    | NodeType::DisjointUnion
+                    | NodeType::Union
+                    | NodeType::Intersection => {
+                        max_lines = 1;
+                        capped_width = 80.0;
+                    }
+                    _ => {
+                        max_lines = 2;
+                        capped_width *= *r * 2.0;
+                    }
+                },
+                None => {}
+            }
+            let mut current_text = label_text.clone();
+
+            temp_buffer.set_wrap(&mut font_system, glyphon::Wrap::Word);
+            temp_buffer.set_size(&mut font_system, Some(capped_width), None);
+
+            // Initial shape
+            temp_buffer.set_text(
+                &mut font_system,
+                &current_text,
+                &Attrs::new(),
+                Shaping::Advanced,
+            );
+            temp_buffer.shape_until_scroll(&mut font_system, false);
+
+            fn line_count(buffer: &glyphon::Buffer) -> usize {
+                buffer.layout_runs().count()
+            }
+
+            if line_count(&temp_buffer) > max_lines {
+                let mut low = 0;
+                let mut high = current_text.len();
+                let mut truncated = current_text.clone();
+
+                while low < high {
+                    let mid = (low + high) / 2;
+                    let candidate = format!("{}…", &current_text[..mid]);
+
+                    temp_buffer.set_text(
+                        &mut font_system,
+                        &candidate,
+                        &Attrs::new(),
+                        Shaping::Advanced,
+                    );
+                    temp_buffer.shape_until_scroll(&mut font_system, false);
+                    let lines = line_count(&temp_buffer);
+
+                    if lines > max_lines {
+                        high = mid;
+                    } else {
+                        truncated = candidate.clone();
+                        low = mid + 1;
+                    }
+                }
+
+                labels[i] = truncated;
+            }
+        }
+
+        // Combine positions and types into NodeInstance entries
+        let node_instance_buffer = vertex_buffer::create_node_instance_buffer(
+            &device,
+            &positions,
+            &node_types,
+            &node_shapes,
+        );
         let num_instances = positions.len() as u32;
 
         // Create bind group 0 with only the resolution uniform (binding 0)
@@ -310,17 +528,13 @@ impl State {
 
         let num_vertices = VERTICES.len() as u32;
 
-        // TODO: remove test edges after adding simulator
-        let edges: [[usize; 2]; 1] = [[0, 0]]; //[[0, 1], [0, 2]];
-        let mut edge_positions: Vec<[[f32; 2]; 2]> = vec![];
-
-        // FIXME If we have 0 edges, wgpu explodes with "buffer slices can not be empty"
-
-        for edge in edges {
-            edge_positions.push([positions[edge[0]], positions[edge[1]]]);
-        }
-        let edge_instance_buffer =
-            vertex_buffer::create_edge_instance_buffer(&device, &edge_positions);
+        let edge_instance_buffer = vertex_buffer::create_edge_instance_buffer(
+            &device,
+            &edges,
+            &positions,
+            &node_shapes,
+            &node_types,
+        );
         let num_edge_instances = edges.len() as u32;
 
         let edge_shader =
@@ -367,16 +581,61 @@ impl State {
             cache: None,
         });
 
+        // Exclude properties without neighbors from simulator
+        let mut neighbor_map: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
+        for [start, center, end] in edges {
+            let mut neighbors = neighbor_map.get(&(start, end));
+            if neighbors.is_none() {
+                neighbors = neighbor_map.get(&(end, start));
+            };
+            match neighbors {
+                Some(cur_neighbors) => {
+                    let mut new_neighbors = cur_neighbors.clone();
+                    new_neighbors.push(center);
+                    neighbor_map.insert(
+                        (usize::min(start, end), usize::max(start, end)),
+                        new_neighbors,
+                    );
+                }
+                None => {
+                    neighbor_map.insert(
+                        (usize::min(start, end), usize::max(start, end)),
+                        vec![center],
+                    );
+                }
+            }
+        }
+        let mut solitary_edges: Vec<[usize; 3]> = vec![];
+        for [start, center, end] in edges {
+            let num_neighbors = neighbor_map
+                .get(&(usize::min(start, end), usize::max(start, end)))
+                .unwrap()
+                .len();
+            if num_neighbors < 2 {
+                solitary_edges.push([start, center, end]);
+            }
+        }
+
         let mut sim_nodes = Vec::with_capacity(positions.len());
-        for pos in positions {
+        for (i, pos) in positions.iter().enumerate() {
             sim_nodes.push(Vec2::new(pos[0], pos[1]));
         }
 
         let mut sim_edges = Vec::with_capacity(edges.len());
-        for edge in edges {
-            sim_edges.push([edge[0].try_into().unwrap(), edge[1].try_into().unwrap()]);
+        for [start, center, end] in edges {
+            sim_edges.push([start as u32, center as u32]);
+            sim_edges.push([center as u32, end as u32]);
         }
-        let mut simulator = Simulator::builder().build(sim_nodes, sim_edges);
+
+        let mut sim_sizes = Vec::with_capacity(positions.len());
+        for node_shape in node_shapes.clone() {
+            match node_shape {
+                NodeShape::Circle { r } => sim_sizes.push(r),
+                NodeShape::Rectangle { w, .. } => sim_sizes.push(w),
+            }
+        }
+
+        let mut simulator = Simulator::builder().build(sim_nodes, sim_edges, sim_sizes);
 
         // Glyphon: do not create heavy glyphon resources unless we have a non-zero surface.
         // Initialize them lazily below (or on first resize).
@@ -386,6 +645,7 @@ impl State {
         let atlas = None;
         let text_renderer = None;
         let text_buffers = None;
+        let cardinality_text_buffers = None;
 
         // Create one text buffer per node with sample labels
         // text_buffers are created when glyphon is initialized (lazy).
@@ -412,7 +672,10 @@ impl State {
             positions: positions.to_vec(),
             labels,
             edges: edges.to_vec(),
+            solitary_edges,
             node_types: node_types.to_vec(),
+            node_shapes,
+            cardinalities,
             frame_count: 0,
             simulator,
             paused: false,
@@ -424,22 +687,12 @@ impl State {
             atlas,
             text_renderer,
             text_buffers,
+            cardinality_text_buffers,
             window,
         };
 
         if surface_configured {
             state.init_glyphon();
-            let num_buffers = state.text_buffers.as_ref().map(|b| b.len()).unwrap_or(0);
-            log::info!("Glyphon initialized: {} text buffers", num_buffers);
-            if let Some(text_buffers) = state.text_buffers.as_ref() {
-                for (i, buf) in text_buffers.iter().enumerate() {
-                    log::info!(
-                        "Buffer {} has {} glyphs",
-                        i,
-                        buf.layout_runs().map(|r| r.glyphs.len()).sum::<usize>()
-                    );
-                }
-            }
         }
 
         Ok(state)
@@ -478,24 +731,47 @@ impl State {
             let line_px = 12.0 * scale;
             let mut buf = GlyphBuffer::new(&mut font_system, Metrics::new(font_px, line_px));
             // per-label size (in physical pixels)
-            // TODO: update if we implement dynamic node size
-            let label_width = 90.0 * scale;
-            let label_height = match self.node_types[i] {
-                NodeType::ExternalClass | NodeType::DeprecatedClass | NodeType::EquivalentClass => {
-                    48.0 * scale
+            let (label_width, label_height) = match self.node_shapes[i] {
+                NodeShape::Rectangle { w, .. } => {
+                    // Calculate physical pixel width from shape's width multiplier
+                    let height = match self.node_types[i] {
+                        NodeType::InverseProperty => 48.0,
+                        _ => 12.0,
+                    };
+                    (w * 85.0 * scale, height * scale)
                 }
-                _ => 24.0 * scale,
+                NodeShape::Circle { r } => {
+                    let height = match self.node_types[i] {
+                        NodeType::ExternalClass
+                        | NodeType::DeprecatedClass
+                        | NodeType::EquivalentClass
+                        | NodeType::DisjointWith
+                        | NodeType::Union
+                        | NodeType::DisjointUnion
+                        | NodeType::Complement
+                        | NodeType::Intersection => 36.0,
+                        _ => 24.0,
+                    };
+                    let width = match self.node_types[i] {
+                        NodeType::Union
+                        | NodeType::DisjointUnion
+                        | NodeType::Complement
+                        | NodeType::Intersection => 75.0,
+                        _ => 85.0,
+                    };
+                    (width * scale * r, height * scale)
+                }
             };
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
-            buf.set_wrap(&mut font_system, glyphon::Wrap::None);
+            buf.set_wrap(&mut font_system, glyphon::Wrap::Word);
             // sample label using the NodeType
             let attrs = &Attrs::new().family(Family::SansSerif);
             let node_type_metrics = Metrics::new(font_px - 3.0, line_px);
-            let mut all_owned_eq_labels: Vec<String> = Vec::new();
+            let mut all_owned_labels: Vec<String> = Vec::new();
             let spans = match self.node_types[i] {
                 NodeType::EquivalentClass => {
                     // TODO: Update when handling equivalent classes from ontology
-                    let mut labels: Vec<&str> = label.split('-').collect();
+                    let mut labels: Vec<&str> = label.split('\n').collect();
                     let label1 = labels.get(0).map_or("", |v| *v);
                     let eq_labels = labels.split_off(1);
                     let (last_label, eq_labels) = eq_labels.split_last().unwrap();
@@ -504,11 +780,11 @@ impl State {
                     for eq_label in eq_labels {
                         let mut extended_label = eq_label.to_string();
                         extended_label.push_str(", ");
-                        all_owned_eq_labels.push(extended_label);
+                        all_owned_labels.push(extended_label);
                     }
-                    all_owned_eq_labels.push(last_label.to_string());
+                    all_owned_labels.push(last_label.to_string());
 
-                    for extended_label in &all_owned_eq_labels {
+                    for extended_label in &all_owned_labels {
                         eq_labels_attributes.push((extended_label.as_str(), attrs.clone()));
                     }
 
@@ -516,6 +792,19 @@ impl State {
                     combined_labels.append(&mut eq_labels_attributes);
 
                     combined_labels
+                }
+                NodeType::InverseProperty => {
+                    let labels: Vec<&str> = label.split('\n').collect();
+                    let mut label1 = labels.get(0).map_or("", |v| *v).to_string();
+                    label1.push_str("\n\n\n");
+                    let label2 = labels.get(1).map_or("", |v| *v);
+                    all_owned_labels.push(label1);
+                    all_owned_labels.push(label2.to_string());
+                    let mut labels_attributes: Vec<(&str, _)> = Vec::new();
+                    for extended_label in &all_owned_labels {
+                        labels_attributes.push((extended_label.as_str(), attrs.clone()));
+                    }
+                    labels_attributes
                 }
                 NodeType::ExternalClass => vec![
                     (label.as_str(), attrs.clone()),
@@ -525,11 +814,22 @@ impl State {
                     (label.as_str(), attrs.clone()),
                     ("\n(deprecated)", attrs.clone().metrics(node_type_metrics)),
                 ],
+                NodeType::DisjointWith => vec![
+                    (label.as_str(), attrs.clone()),
+                    ("\n\n(disjoint)", attrs.clone().metrics(node_type_metrics)),
+                ],
                 NodeType::Thing => vec![("Thing", attrs.clone())],
-                NodeType::Complement => vec![("¬", attrs.clone())],
-                NodeType::DisjointUnion => vec![("1", attrs.clone())],
-                NodeType::Intersection => vec![("∩", attrs.clone())],
-                NodeType::Union => vec![("∪", attrs.clone())],
+                NodeType::Complement => {
+                    vec![(label.as_str(), attrs.clone()), ("\n\n¬", attrs.clone())]
+                }
+                NodeType::DisjointUnion => {
+                    vec![(label.as_str(), attrs.clone()), ("\n\n1", attrs.clone())]
+                }
+                NodeType::Intersection => {
+                    vec![(label.as_str(), attrs.clone()), ("\n\n∩", attrs.clone())]
+                }
+                NodeType::Union => vec![(label.as_str(), attrs.clone()), ("\n\n∪", attrs.clone())],
+                NodeType::SubclassOf => vec![("Subclass of", attrs.clone())],
                 _ => vec![(label.as_str(), attrs.clone())],
             };
             buf.set_rich_text(
@@ -543,12 +843,42 @@ impl State {
             text_buffers.push(buf);
         }
 
+        // cardinalities
+        let mut cardinality_buffers: Vec<(usize, GlyphBuffer)> = Vec::new();
+        for (edge_u32, (cardinality_min, cardinality_max)) in self.cardinalities.iter() {
+            let edge_idx = *edge_u32 as usize;
+            let font_px = 12.0 * scale;
+            let line_px = 12.0 * scale;
+            let mut buf = GlyphBuffer::new(&mut font_system, Metrics::new(font_px, line_px));
+            let label_width = 48.0 * scale;
+            let label_height = 24.0 * scale;
+            buf.set_size(&mut font_system, Some(label_width), Some(label_height));
+
+            let attrs = &Attrs::new().family(Family::SansSerif);
+            let cardinality_text = match cardinality_max {
+                Some(max) => format!("{}..{}", cardinality_min, max),
+                None => format!("{}", cardinality_min),
+            };
+            let spans = vec![(cardinality_text.as_str(), attrs.clone())];
+            buf.set_rich_text(
+                &mut font_system,
+                spans,
+                &attrs,
+                Shaping::Advanced,
+                Some(glyphon::cosmic_text::Align::Center),
+            );
+            buf.shape_until_scroll(&mut font_system, false);
+
+            cardinality_buffers.push((edge_idx, buf));
+        }
+
         self.font_system = Some(font_system);
         self.swash_cache = Some(swash_cache);
         self.viewport = Some(viewport);
         self.atlas = Some(atlas);
         self.text_renderer = Some(text_renderer);
         self.text_buffers = Some(text_buffers);
+        self.cardinality_text_buffers = Some(cardinality_buffers);
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -607,7 +937,22 @@ impl State {
             let mut areas: Vec<TextArea> = Vec::new();
             for (i, buf) in text_buffers.iter().enumerate() {
                 // node logical coords
-                let node_logical = self.positions[i];
+                let node_logical = match self.node_types[i] {
+                    NodeType::InverseProperty => {
+                        let position_x = self.positions[i][0];
+                        let position_y = self.positions[i][1] + 18.0;
+                        [position_x, position_y]
+                    }
+                    NodeType::Complement
+                    | NodeType::DisjointUnion
+                    | NodeType::Union
+                    | NodeType::Intersection => {
+                        let position_x = self.positions[i][0];
+                        let position_y = self.positions[i][1] + 24.0;
+                        [position_x, position_y]
+                    }
+                    _ => self.positions[i],
+                };
 
                 // convert node coords to physical pixels
                 let node_x_px = node_logical[0] * scale;
@@ -621,7 +966,7 @@ impl State {
                 let left = node_x_px - label_w * 0.5;
 
                 let line_height = 8.0;
-                // top = distance-from-top-in-physical-pixels
+                // top = distance from top in physical pixels
                 let top = match self.node_types[i] {
                     NodeType::EquivalentClass => node_y_px - 2.0 * line_height,
                     _ => node_y_px - line_height,
@@ -641,6 +986,103 @@ impl State {
                     default_color: Color::rgb(0, 0, 0),
                     custom_glyphs: &[],
                 });
+            }
+
+            // cardinalities
+            if let Some(card_buffers) = self.cardinality_text_buffers.as_ref() {
+                for (edge_idx, buf) in card_buffers.iter() {
+                    // make sure edge index is valid
+                    if *edge_idx >= self.edges.len() {
+                        continue;
+                    }
+                    let edge = self.edges[*edge_idx];
+                    let center_idx = edge[1];
+                    let end_idx = edge[2];
+
+                    // node logical coords
+                    let center_log = self.positions[center_idx];
+                    let end_log = self.positions[end_idx];
+
+                    // convert to physical pixels
+                    let center_x_px = center_log[0] * scale;
+                    let center_y_px = vp_h_px - center_log[1] * scale;
+                    let end_x_px = end_log[0] * scale;
+                    let end_y_px = vp_h_px - end_log[1] * scale;
+
+                    // direction vector (center - start) in physical pixel space
+                    let dir_x = center_x_px - end_x_px;
+                    let dir_y = center_y_px - end_y_px;
+                    let radius_pix = 50.0;
+
+                    let (offset_px_x, offset_px_y) = match self.node_shapes[end_idx] {
+                        NodeShape::Circle { r } => (
+                            (radius_pix + 15.0) * r * scale,
+                            (radius_pix + 15.0) * r * scale,
+                        ),
+                        NodeShape::Rectangle { w, h } => {
+                            let half_w_px = (w * 0.9 / 2.0) * radius_pix;
+                            let half_h_px = (h * 0.25 / 2.0) * radius_pix;
+
+                            let len = (dir_x * dir_x + dir_y * dir_y).sqrt().max(1.0);
+                            let nx = dir_x / len;
+                            let ny = dir_y / len;
+
+                            // Compute intersection with rectangle perimeter in direction (nx, ny)
+                            let tx = if nx.abs() > 1e-6 {
+                                half_w_px / nx.abs()
+                            } else {
+                                f32::INFINITY
+                            };
+                            let ty = if ny.abs() > 1e-6 {
+                                half_h_px / ny.abs()
+                            } else {
+                                f32::INFINITY
+                            };
+
+                            // Intersection distance is the smaller of the two
+                            let t = tx.min(ty);
+
+                            // Add padding to place the label away from the edge
+                            let padding = 45.0;
+                            let dist = t + padding;
+
+                            // Return the final scalar distance for both axes
+                            (dist, dist)
+                        }
+                    };
+
+                    // normalized direction (guard against zero-length)
+                    let len = (dir_x * dir_x + dir_y * dir_y).sqrt().max(1.0);
+                    let nx: f32 = dir_x / len;
+                    let ny = dir_y / len;
+
+                    // place label at end node plus offset along the center-->end angle
+                    let card_x_px = end_x_px + nx * offset_px_x;
+                    let card_y_px = end_y_px + ny * offset_px_y;
+
+                    // compute bounds from buffer size and center the label
+                    let (label_w_opt, label_h_opt) = buf.size();
+                    let label_w = label_w_opt.unwrap_or(48.0) as f32;
+                    let label_h = label_h_opt.unwrap_or(24.0) as f32;
+
+                    let left = card_x_px - label_w * 0.5;
+                    let top = card_y_px - label_h * 0.5;
+
+                    areas.push(TextArea {
+                        buffer: buf,
+                        left,
+                        top,
+                        scale: 1.0,
+                        bounds: TextBounds {
+                            left: left as i32,
+                            top: top as i32,
+                            right: (left + label_w) as i32,
+                            bottom: (top + label_h) as i32,
+                        },
+                        default_color: Color::rgb(0, 0, 0),
+                        custom_glyphs: &[],
+                    });
+                }
             }
 
             viewport.update(
@@ -743,36 +1185,41 @@ impl State {
         for (i, (_, position)) in (&entities, &positions).join().enumerate() {
             self.positions[i] = [position.0.x, position.0.y];
         }
-        // self.frame_count += 1;
-        // let t = ((self.frame_count as f32) * 0.05).sin();
 
-        // // Update node positions
-        // self.positions[1] = [self.positions[1][0], self.positions[1][1] + t];
-
-        let nodes: Vec<NodeInstance> = self
-            .positions
-            .iter()
-            .zip(self.node_types.iter())
-            .map(|(pos, ty)| NodeInstance {
-                position: *pos,
-                node_type: *ty as u32,
-            })
-            .collect();
-
-        let mut edge_positions: Vec<[[f32; 2]; 2]> = Vec::with_capacity(self.edges.len());
-        // Update edge endpoints from node positions
-        for edge in &mut self.edges {
-            edge_positions.push([self.positions[edge[0]], self.positions[edge[1]]]);
+        for [start, center, end] in &self.solitary_edges {
+            if *start == *end {
+                continue;
+            }
+            let center_x = (self.positions[*start][0] + self.positions[*end][0]) / 2.0;
+            let center_y = (self.positions[*start][1] + self.positions[*end][1]) / 2.0;
+            self.positions[*center] = [center_x, center_y];
         }
+
+        let node_instances = vertex_buffer::build_node_instances(
+            &self.device,
+            &self.positions,
+            &self.node_types,
+            &self.node_shapes,
+        );
+
+        let edge_instances = vertex_buffer::build_edge_instances(
+            &self.edges,
+            &self.positions,
+            &self.node_shapes,
+            &self.node_types,
+        );
 
         self.queue.write_buffer(
             &self.edge_instance_buffer,
             0,
-            bytemuck::cast_slice(&edge_positions),
+            bytemuck::cast_slice(&edge_instances),
         );
 
-        self.queue
-            .write_buffer(&self.node_instance_buffer, 0, bytemuck::cast_slice(&nodes));
+        self.queue.write_buffer(
+            &self.node_instance_buffer,
+            0,
+            bytemuck::cast_slice(&node_instances),
+        );
     }
 
     pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {

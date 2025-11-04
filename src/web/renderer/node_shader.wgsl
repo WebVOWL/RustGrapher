@@ -1,20 +1,24 @@
 struct VertIn {
-    @location(0) quad_pos: vec2<f32>, // [-1..1] quad corner in local space
-    @location(1) inst_pos: vec2<f32>, // per-instance node position in pixels
-    @location(2) node_type: u32, // Type of node used when drawing
+    @location(0) quad_pos: vec2<f32>,         // [-1..1] quad corner in local space
+    @location(1) inst_pos: vec2<f32>,         // per-instance node position in pixels
+    @location(2) node_type: u32,              // Type of node used when drawing
+    @location(3) shape: u32,                  // The shape of the node, 0: Circle, 1: Rectangle
+    @location(4) shape_dimensions: vec2<f32>, // The radius of a circle or the width and height of a rectangle
 };
 
 struct VertOut {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) v_uv: vec2<f32>, // 0..1 inside quad
-    @interpolate(flat) @location(1) node_type: u32,
+    @interpolate(flat) @location(1) v_node_type: u32,
+    @interpolate(flat) @location(2) v_shape: u32,
+    @location(3) v_shape_dimensions: vec2<f32>,
 };
 
 @group(0) @binding(0)
 var<uniform> u_resolution: vec4<f32>; // xy = pixel resolution
 
 // per-instance radius fixed
-const NODE_RADIUS_PIX = 48.0; // pixels
+const NODE_RADIUS_PIX = 50.0; // pixels
 
 @vertex
 fn vs_node_main(
@@ -23,26 +27,29 @@ fn vs_node_main(
 ) -> VertOut {
     var out: VertOut;
 
-    // fetch node position (in pixel coordinates) from per-instance attribute
-    let pos_px: vec2<f32> = in.inst_pos;
+    let pos_px = in.inst_pos;
 
-    // quad_pos is [-1..1] so convert to offset in pixels
-    let offset_px = in.quad_pos * vec2(NODE_RADIUS_PIX);
+    // compute non-uniform scale for shape geometry
+    var scale_xy = vec2<f32>(in.shape_dimensions.x, in.shape_dimensions.y);
+    if (in.shape == 0u) {
+        // circle -> use same x and y
+        scale_xy = vec2<f32>(in.shape_dimensions.x, in.shape_dimensions.x);
+    }
 
-    // screen position in pixels
+    // offset for screen-space positioning
+    let offset_px = in.quad_pos * (NODE_RADIUS_PIX * scale_xy);
     let screen = pos_px + offset_px;
 
-    // convert to NDC clip space: x -> [-1,1] left->right, y -> [-1,1] bottom->top
     let ndc_x = (screen.x / u_resolution.x) * 2.0 - 1.0;
     let ndc_y = (screen.y / u_resolution.y) * 2.0 - 1.0;
     out.clip_position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
 
-    // uv 0..1 for circle mask; quad_pos [-1..1] -> uv [0..1]
-    out.v_uv = in.quad_pos * 0.5 + vec2<f32>(0.5, 0.5);
+    let aspect = vec2<f32>(in.quad_pos.x, in.quad_pos.y);
+    out.v_uv = aspect * 0.5 + vec2<f32>(0.5, 0.5);
 
-    out.node_type = in.node_type;
-
-    out.node_type = in.node_type;
+    out.v_node_type = in.node_type;
+    out.v_shape = in.shape;
+    out.v_shape_dimensions = in.shape_dimensions;
 
     return out;
 }
@@ -50,6 +57,7 @@ fn vs_node_main(
 // parameters
 const BORDER_THICKNESS = 0.03;   // how thick the border ring is
 const EDGE_SOFTNESS    = 0.02;   // anti-aliasing
+const RECT_SCALE = vec2(0.9, 0.25);
 // polar angle based repeating pattern (dotted border)
 const PI = 3.14159265;
 const DOT_COUNT = 14.0;        // number of dots around the ring
@@ -64,14 +72,11 @@ const LITERAL_COLOR = vec3<f32>(1.0, 0.8, 0.2);
 const BORDER_COLOR = vec3<f32>(0.0);
 const DEPRECATED_COLOR = vec3<f32>(0.6038);
 const SET_COLOR = vec3<f32>(0.4, 0.6, 0.8);
+const DATATYPE_PROPERTY_COLOR = vec3<f32>(0.6039, 0.7960, 0.4039);
 
 @fragment
 fn fs_node_main(in: VertOut) -> @location(0) vec4<f32> {
-    // circle distance
-    
-    let v_uv = in.v_uv;
-
-    return draw_node_by_type(in.node_type, v_uv);
+    return draw_node_by_type(in.v_node_type, in.v_uv, in.v_shape_dimensions);
 }
 
 fn draw_class(v_uv: vec2<f32>) -> vec4<f32> {
@@ -121,7 +126,7 @@ fn draw_external_class(v_uv: vec2<f32>) -> vec4<f32> {
 
 fn draw_thing(v_uv: vec2<f32>) -> vec4<f32> {
     let d = distance(v_uv, vec2<f32>(0.5, 0.5));
-    let r = 0.43;
+    let r = 0.48;
     // smooth fill mask (circle inside without border)
     var fill_mask = 1.0 - smoothstep(r - BORDER_THICKNESS, r - BORDER_THICKNESS + EDGE_SOFTNESS, d);
 
@@ -317,8 +322,8 @@ fn draw_complement(v_uv: vec2<f32>) -> vec4<f32> {
     let border_gap = 0.35;
 
     // radius of the inner border
-    let inner_border_outer_r = r - BORDER_THICKNESS - border_gap;
-    let inner_border_inner_r = inner_border_outer_r - BORDER_THICKNESS;
+    let inner_border_outer_r = r - BORDER_THICKNESS * 0.8 - border_gap;
+    let inner_border_inner_r = inner_border_outer_r - BORDER_THICKNESS * 0.8;
 
     // masks
     let inner_fill_mask = 1.0 - smoothstep(inner_border_inner_r, inner_border_inner_r + EDGE_SOFTNESS, d);
@@ -408,9 +413,9 @@ fn draw_anonymous_class(v_uv: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(col, alpha);
 }
 
-fn draw_literal(v_uv: vec2<f32>) -> vec4<f32> {
+fn draw_literal(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
     let rect_center = vec2<f32>(0.5, 0.5);
-    let rect_size = vec2(0.9, 0.25);
+    var rect_size = RECT_SCALE;
     let dot_count_rect = 11.0;
     let dot_radius_rect = 0.3;
     let fill_color = LITERAL_COLOR;
@@ -477,7 +482,9 @@ fn draw_literal(v_uv: vec2<f32>) -> vec4<f32> {
     col = mix(col, BORDER_COLOR, border_mask);
     col = mix(col, fill_color, fill_mask);
 
-    return vec4<f32>(col, 1.0);
+    let alpha = clamp(fill_mask + border_mask, 0.0, 1.0);
+
+    return vec4<f32>(col, alpha);
 }
 
 fn draw_rdfs_class(v_uv: vec2<f32>) -> vec4<f32> {
@@ -535,7 +542,164 @@ fn draw_rdfs_resource(v_uv: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(col, alpha);
 }
 
-fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>) -> vec4<f32> {
+fn draw_datatype(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
+    let rect_center = vec2<f32>(0.5, 0.5);
+    let rect_size = RECT_SCALE;
+    let border_thickness = BORDER_THICKNESS * 0.5; // controls visible border width
+    let edge_softness = EDGE_SOFTNESS * 0.5; // controls AA smoothness
+
+    let fill_color = LITERAL_COLOR;
+
+    // Convert to local space relative to rectangle center
+    let p = abs(v_uv - rect_center);
+    let half_size = 0.5 * rect_size;
+
+    // Signed distance to rectangle boundary (negative inside)
+    let dist = max(p.x - half_size.x, p.y - half_size.y);
+
+    // Smooth alpha mask for outer edge (anti-aliasing)
+    let outer_alpha = 1.0 - smoothstep(0.0, edge_softness, dist);
+
+    // Smooth mask for *inner border* (offset by thickness)
+    let inner_alpha = 1.0 - smoothstep(-border_thickness, -border_thickness + edge_softness, dist);
+
+    // Border is the difference between outer and inner areas
+    let border_mask = outer_alpha - inner_alpha;
+
+    // Blend background -> border -> fill
+    var col = mix(BACKGROUND_COLOR, BORDER_COLOR, border_mask);
+    col = mix(col, fill_color, inner_alpha);
+
+    let alpha = clamp(outer_alpha, 0.0, 1.0);
+    return vec4<f32>(col, alpha);
+}
+
+fn draw_property(v_uv: vec2<f32>, shape_dimensions: vec2<f32>, fill_color: vec3<f32>) -> vec4<f32> {
+    let rect_center = vec2<f32>(0.5, 0.5);
+    var rect_size = RECT_SCALE;
+
+    let p = v_uv - rect_center;
+
+    let half_size = 0.5 * rect_size;
+
+    let inside_x = abs(p.x) <= half_size.x;
+    let inside_y = abs(p.y) <= half_size.y;
+
+    let inside_rect = inside_x && inside_y;
+    // mask selection
+    var fill_mask = 0.0;
+    if(inside_rect) {
+        fill_mask = 1.0;
+    }
+
+    // composite
+    var col = BACKGROUND_COLOR;
+    col = mix(col, fill_color, fill_mask);
+
+    let alpha = clamp(fill_mask, 0.0, 1.0);
+
+    return vec4<f32>(col, alpha);
+}
+
+fn draw_inverse_property(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
+    let fill_color = LIGHT_BLUE;
+    let rect_center1 = vec2<f32>(0.5, 0.32);
+    let rect_center2 = vec2<f32>(0.5, 0.68);
+    var rect_size = RECT_SCALE;
+
+    let p1 = v_uv - rect_center1;
+    let p2 = v_uv - rect_center2;
+
+    let half_size = 0.5 * rect_size;
+
+    let inside_x1 = abs(p1.x) <= half_size.x;
+    let inside_y1 = abs(p1.y) <= half_size.y;
+    let inside_x2 = abs(p2.x) <= half_size.x;
+    let inside_y2 = abs(p2.y) <= half_size.y;
+
+    let inside_rect1 = inside_x1 && inside_y1;
+    let inside_rect2 = inside_x2 && inside_y2;
+    // mask selection
+    var fill_mask = 0.0;
+    if(inside_rect1 || inside_rect2) {
+        fill_mask = 1.0;
+    }
+
+    // composite
+    var col = BACKGROUND_COLOR;
+    col = mix(col, fill_color, fill_mask);
+
+    let alpha = clamp(fill_mask, 0.0, 1.0);
+
+    return vec4<f32>(col, alpha);
+}
+
+fn draw_disjoint_with(v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
+    let rect_center = vec2<f32>(0.5, 0.5);
+    var rect_size = RECT_SCALE;
+
+    let p = v_uv - rect_center;
+
+    let half_size = 0.5 * rect_size;
+
+    // perimeter coordinate
+    let width = 2.0 * half_size.x;
+    let height = 2.0 * half_size.y;
+    let perim = 2.0 * (width + height);
+
+    // positions for two inner circles
+    let circle_r = 0.10;
+    let offset = 0.15;
+    let c1 = vec2<f32>(0.5 - offset, 0.5);
+    let c2 = vec2<f32>(0.5 + offset, 0.5);
+
+    let d1 = distance(v_uv, c1);
+    let d2 = distance(v_uv, c2);
+
+    // Inner circle fill and border masks
+    let inner_fill_1 = 1.0 - smoothstep(circle_r, circle_r + EDGE_SOFTNESS, d1);
+    let inner_fill_2 = 1.0 - smoothstep(circle_r, circle_r + EDGE_SOFTNESS, d2);
+
+    // borders
+    let border_outer_r = circle_r + BORDER_THICKNESS * 0.4;
+    let border_inner_r = circle_r - BORDER_THICKNESS * 0.4;
+
+    let border_1 =
+        smoothstep(border_inner_r, border_inner_r + EDGE_SOFTNESS, d1) *
+        (1.0 - smoothstep(border_outer_r, border_outer_r + EDGE_SOFTNESS, d1));
+    let border_2 =
+        smoothstep(border_inner_r, border_inner_r + EDGE_SOFTNESS, d2) *
+        (1.0 - smoothstep(border_outer_r, border_outer_r + EDGE_SOFTNESS, d2));
+
+    let inner_fill_mask = clamp(inner_fill_1 + inner_fill_2, 0.0, 1.0);
+    let inner_border_mask = clamp(border_1 + border_2, 0.0, 1.0);
+
+    let inside_x = abs(p.x) <= half_size.x;
+    let inside_y = abs(p.y) <= half_size.y;
+
+    let inside_rect = inside_x && inside_y;
+    // mask selection
+    var outer_fill_mask = 0.0;
+    if(inside_rect) {
+        outer_fill_mask = 1.0;
+    }
+
+    // colors
+    let inner_fill_color = SET_COLOR;
+    let outer_fill_color = LIGHT_BLUE;
+
+    // composite
+    var col = BACKGROUND_COLOR;
+    col = mix(col, outer_fill_color, outer_fill_mask);
+    col = mix(col, inner_fill_color, inner_fill_mask);
+    col = mix(col, BORDER_COLOR, inner_border_mask);
+
+    let alpha = clamp(outer_fill_mask + inner_fill_mask + inner_border_mask, 0.0, 1.0);
+
+    return vec4<f32>(col, alpha);
+}
+
+fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>, shape_dimensions: vec2<f32>) -> vec4<f32> {
     switch node_type {
         case 0: {return draw_class(v_uv);}
         case 1: {return draw_external_class(v_uv);}
@@ -547,9 +711,19 @@ fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>) -> vec4<f32> {
         case 7: {return draw_complement(v_uv);}
         case 8: {return draw_deprecated_class(v_uv);}
         case 9: {return draw_anonymous_class(v_uv);}
-        case 10: {return draw_literal(v_uv);}
+        case 10: {return draw_literal(v_uv, shape_dimensions);}
         case 11: {return draw_rdfs_class(v_uv);}
         case 12: {return draw_rdfs_resource(v_uv);}
-        default: {return draw_class(v_uv);}
+        case 13: {return draw_datatype(v_uv, shape_dimensions);}
+        case 14: {return draw_property(v_uv, shape_dimensions, LIGHT_BLUE);}
+        case 15: {return draw_property(v_uv, shape_dimensions, DATATYPE_PROPERTY_COLOR);}
+        case 16: {return draw_property(v_uv, shape_dimensions, vec3<f32>(1.0));}
+        case 17: {return draw_inverse_property(v_uv, shape_dimensions);}
+        case 18: {return draw_disjoint_with(v_uv, shape_dimensions);}
+        case 19: {return draw_property(v_uv, shape_dimensions, RDFS_COLOR);}
+        case 20: {return draw_property(v_uv, shape_dimensions, DEPRECATED_COLOR);}
+        case 21: {return draw_property(v_uv, shape_dimensions, DARK_BLUE);}
+        case 22: {return draw_property(v_uv, shape_dimensions, LIGHT_BLUE);}
+        default: {return vec4<f32>(0.0);}
     }
 }
