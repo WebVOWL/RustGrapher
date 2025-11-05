@@ -97,14 +97,6 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     // Calculate physical distance from this fragment to the end point
     let dist_to_end = length(px - tip);
 
-    // Default diamond/arrow shape length
-    var head_length_px = ARROW_LENGTH_PX;
-
-    if (in.v_line_type == 4u) {
-        // Diamond arrow for set operators
-        head_length_px = ARROW_LENGTH_PX * 2.0;
-    }
-    
     // Apply dash/dot pattern
     if (in.v_line_type == 1u || in.v_line_type == 2u || in.v_line_type == 4u) {
         let chord_len = length(in.v_curve_end - in.v_curve_start);

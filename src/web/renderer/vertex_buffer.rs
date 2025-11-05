@@ -70,7 +70,6 @@ impl NodeInstance {
 }
 
 pub fn build_node_instances(
-    device: &wgpu::Device,
     positions: &[[f32; 2]],
     node_types: &[NodeType],
     node_shapes: &[NodeShape],
@@ -97,7 +96,7 @@ pub fn create_node_instance_buffer(
     node_types: &[NodeType],
     node_shapes: &[NodeShape],
 ) -> wgpu::Buffer {
-    let node_instances = build_node_instances(device, positions, node_types, node_shapes);
+    let node_instances = build_node_instances(positions, node_types, node_shapes);
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("instance_node_buffer"),
         contents: bytemuck::cast_slice(&node_instances),

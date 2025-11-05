@@ -999,6 +999,15 @@ impl State {
                 let node_x_px = node_logical[0] * scale;
                 let node_y_px = vp_h_px - node_logical[1] * scale;
 
+                // skip text rendering for nodes outside the viewport
+                if node_x_px < -50.0
+                    || node_x_px > vp_w_px + 50.0
+                    || node_y_px < -50.0
+                    || node_y_px > vp_h_px + 50.0
+                {
+                    continue;
+                }
+
                 let (label_w_opt, label_h_opt) = buf.size();
                 let label_w = label_w_opt.unwrap_or(96.0) as f32;
                 let label_h = label_h_opt.unwrap_or(24.0) as f32;
@@ -1053,7 +1062,7 @@ impl State {
                     // direction vector (center - start) in physical pixel space
                     let dir_x = center_x_px - end_x_px;
                     let dir_y = center_y_px - end_y_px;
-                    let radius_pix = 50.0;
+                    let radius_pix: f32 = 50.0;
 
                     let (offset_px_x, offset_px_y) = match self.node_shapes[end_idx] {
                         NodeShape::Circle { r } => (
@@ -1100,6 +1109,17 @@ impl State {
                     // place label at end node plus offset along the center-->end angle
                     let card_x_px = end_x_px + nx * offset_px_x;
                     let card_y_px = end_y_px + ny * offset_px_y;
+
+                    // skip text rendering for cardinalities outside the viewport
+                    let vp_h_px = self.config.height as f32 * scale as f32;
+                    let vp_w_px = self.config.width as f32 * scale as f32;
+                    if card_x_px < -10.0
+                        || card_x_px > vp_w_px + 10.0
+                        || card_y_px < -10.0
+                        || card_y_px > vp_h_px + 10.0
+                    {
+                        continue;
+                    }
 
                     // compute bounds from buffer size and center the label
                     let (label_w_opt, label_h_opt) = buf.size();
@@ -1242,7 +1262,6 @@ impl State {
         }
 
         let node_instances = vertex_buffer::build_node_instances(
-            &self.device,
             &self.positions,
             &self.node_types,
             &self.node_shapes,
