@@ -111,7 +111,7 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
         let pattern_scale = max(1.0, chord_len / DASH_LENGTH_PX);
         let dot_fraction = 0.6;
         let pattern_phase = fract(t * pattern_scale);
-        let fade = AA_SOFTNESS * 0.05;
+        let fade = AA_SOFTNESS * 0.025;
         let dot_mask = smoothstep(0.0, fade, pattern_phase) * (1.0 - smoothstep(dot_fraction, dot_fraction + fade, pattern_phase));
         line_alpha *= dot_mask;
     }
