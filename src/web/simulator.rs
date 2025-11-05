@@ -392,10 +392,10 @@ impl Default for SimulatorBuilder {
             spring_stiffness: 300.0,
             spring_neutral_length: 70.0,
             gravity_force: 30.0,
-            delta_time: 0.01,
+            delta_time: 0.005,
             damping: 0.8,
-            quadtree_theta: 0.0,
-            freeze_thresh: 0.0,
+            quadtree_theta: 0.8,
+            freeze_thresh: 2.0,
         }
     }
 }
