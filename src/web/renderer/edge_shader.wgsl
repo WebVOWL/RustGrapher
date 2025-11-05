@@ -1,121 +1,63 @@
 struct VertIn {
-    @location(0) quad_pos: vec2<f32>,         // [-1..1]
-    @location(1) start: vec2<f32>,            // start of edge (in px)
-    @location(2) center: vec2<f32>,           // point ON curve at t=0.5 (in px)
-    @location(3) end: vec2<f32>,              // end of edge (in px)
-    @location(4) end_shape: u32,              // The shape of the node pointed to, 0: Circle, 1: Rectangle
-    @location(5) shape_dimensions: vec2<f32>, // The radius of a circle or the width and height of a rectangle
-    @location(6) line_type: u32,
+    @location(0) position: vec2<f32>,        // Position in pixel space
+    @location(1) t_param: f32,               // Parameter along curve [0..1]
+    @location(2) side: f32,                  // -1 or +1 for left/right
+    @location(3) line_type: u32,             // Line style
+    @location(4) end_shape_type: u32,        // 0: Circle, 1: Rectangle
+    @location(5) end_shape_dim: vec2<f32>,   // Shape dimensions
+    @location(6) curve_start: vec2<f32>,     // Start of curve
+    @location(7) curve_end: vec2<f32>,       // End of curve
+    @location(8) tangent_at_end: vec2<f32>,  // Tangent at t=1
+    @location(9) ctrl: vec2<f32>,            // Control point for quadratic Bezier
 };
 
 struct VertOut {
     @builtin(position) clip_position: vec4<f32>,
-    @location(0) v_uv: vec2<f32>,
-    @location(1) v_start: vec2<f32>,
-    @location(2) v_center_ctrl: vec2<f32>, // control point used by quadratic bezier
-    @location(3) v_end: vec2<f32>,
-    @interpolate(flat) @location(4) v_mbr_min: vec2<f32>,
-    @interpolate(flat) @location(5) v_mbr_max: vec2<f32>,
-    @interpolate(flat) @location(6) v_end_shape: u32,
-    @location(7) v_shape_dimensions: vec2<f32>,
-    @interpolate(flat) @location(8) v_line_type: u32,
-
-    // Precomputed quadratic coefficients and tangent
-    @location(9) v_quad_a: vec2<f32>,
-    @location(10) v_quad_b: vec2<f32>,
-    @location(11) v_tangent_at1: vec2<f32>,
-    @location(12) v_approx_len: f32,
+    @location(0) v_t: f32,
+    @location(1) v_side: f32,
+    @interpolate(flat) @location(2) v_line_type: u32,
+    @interpolate(flat) @location(3) v_end_shape_type: u32,
+    @location(4) v_end_shape_dim: vec2<f32>,
+    @location(5) v_curve_start: vec2<f32>,
+    @location(6) v_curve_end: vec2<f32>,
+    @location(7) v_tangent_at_end: vec2<f32>,
+    @location(8) v_position_px: vec2<f32>,   // Position in pixel space
+    @location(9) v_ctrl: vec2<f32>,          // Control point for quadratic Bezier
 };
 
 @group(0) @binding(0)
 var<uniform> u_resolution: vec4<f32>; // xy = screen size
 
-// visual & geometry constants
-const LINE_THICKNESS: f32 = 1.0;
-const AA_SOFTNESS: f32 = 1.0;
-
-// arrow constants (pixels)
+// Arrow constants (pixels)
 const ARROW_LENGTH_PX: f32 = 10.0;
 const ARROW_WIDTH_PX: f32 = 15.0;
-const ARROW_AA: f32 = 0.1;
-const NODE_RADIUS_PIX: f32 = 50.0;
+const AA_SOFTNESS: f32 = 1.5;
+const DASH_LENGTH_PX: f32 = 20.0;
+const LINE_THICKNESS = 1.5;
 
-// Tunable performance/precision
-const SAMPLE_COUNT: u32 = 24u;   // lower = faster, higher = more accurate
-const NR_ITER: i32 = 10;          // Newton-Raphson iterations
-
-// Evaluate Bézier point (quadratic) directly using coefficients
-fn bezier_point_from_coeffs(a: vec2<f32>, b: vec2<f32>, p0: vec2<f32>, t: f32) -> vec2<f32> {
-    // a*t^2 + b*t + p0
-    return a * t * t + b * t + p0;
+fn bezier_point(p0: vec2<f32>, ctrl: vec2<f32>, p2: vec2<f32>, t: f32) -> vec2<f32> {
+    let t1 = 1.0 - t;
+    return t1 * t1 * p0 + 2.0 * t1 * t * ctrl + t * t * p2;
 }
 
 @vertex
 fn vs_edge_main(in: VertIn) -> VertOut {
     var out: VertOut;
 
-    let p0 = in.start;
-    let p2 = in.end;
-    let on_mid = in.center; // point that must lie on the curve at t = 0.5
-
-    // compute quadratic bezier control point that ensures B(0.5) == on_mid
-    // derived from 0.25*p0 + 0.5*c + 0.25*p2 = on_mid  => c = 2*on_mid - 0.5*(p0 + p2)
-    let ctrl = (4.0 * on_mid - p0 - p2) * 0.5;
-
-    // quadratic coefficients: B(t) = a*t^2 + b*t + p0
-    let a = p0 - 2.0 * ctrl + p2;
-    let b = 2.0 * (ctrl - p0);
-
-    // precompute tangent at t = 1 (derivative = 2*a*t + b => at t=1 => 2*a + b)
-    let tangent_at1 = 2.0 * a + b;
-
-    // approximate curve length cheaply: chord + two control segment
-    let approx_len = distance(p0, ctrl) + distance(ctrl, p2);
-
-    // find possible extrema using control point
-    let denom_x = p0.x - 2.0 * ctrl.x + p2.x;
-    let denom_y = p0.y - 2.0 * ctrl.y + p2.y;
-
-    var min_p = min(p0, p2);
-    var max_p = max(p0, p2);
-
-    if (abs(denom_x) > 1e-5) {
-        let tx = clamp((p0.x - ctrl.x) / denom_x, 0.0, 1.0);
-        let bx = bezier_point_from_coeffs(a, b, p0, tx);
-        min_p = min(min_p, bx);
-        max_p = max(max_p, bx);
-    }
-    if (abs(denom_y) > 1e-5) {
-        let ty = clamp((p0.y - ctrl.y) / denom_y, 0.0, 1.0);
-        let by = bezier_point_from_coeffs(a, b, p0, ty);
-        min_p = min(min_p, by);
-        max_p = max(max_p, by);
-    }
-
-    // pad for thickness and arrow
-    min_p -= vec2<f32>(LINE_THICKNESS + AA_SOFTNESS + ARROW_WIDTH_PX);
-    max_p += vec2<f32>(LINE_THICKNESS + AA_SOFTNESS + ARROW_WIDTH_PX);
-
-    // map quad to this rectangle
-    let pos_px = mix(min_p, max_p, in.quad_pos * 0.5 + vec2<f32>(0.5));
-    let ndc = (pos_px / u_resolution.xy) * 2.0 - vec2<f32>(1.0, 1.0);
-
+    // Convert pixel position to NDC
+    let ndc = (in.position / u_resolution.xy) * 2.0 - vec2<f32>(1.0, 1.0);
+    
     out.clip_position = vec4<f32>(ndc, 0.0, 1.0);
-    out.v_uv = in.quad_pos * 0.5 + vec2<f32>(0.5);
-    out.v_start = p0;
-    out.v_center_ctrl = ctrl;
-    out.v_end = p2;
-    out.v_mbr_min = min_p;
-    out.v_mbr_max = max_p;
-    out.v_end_shape = in.end_shape;
-    out.v_shape_dimensions = in.shape_dimensions;
+    out.v_t = in.t_param;
+    out.v_side = in.side;
     out.v_line_type = in.line_type;
-
-    // pass precomputed coefficients and tangent
-    out.v_quad_a = a;
-    out.v_quad_b = b;
-    out.v_tangent_at1 = tangent_at1;
-    out.v_approx_len = approx_len;
+    out.v_end_shape_type = in.end_shape_type;
+    out.v_end_shape_dim = in.end_shape_dim;
+    out.v_curve_start = in.curve_start;
+    out.v_curve_end = in.curve_end;
+    out.v_tangent_at_end = in.tangent_at_end;
+    out.v_position_px = in.position;
+    out.v_ctrl = in.ctrl;
 
     return out;
 }
@@ -132,171 +74,67 @@ fn point_to_segment_dist(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
     return length(p - closest);
 }
 
-// fast triangle area via 0.5 * abs(cross)
+// Fast triangle area via cross product
 fn tri_area_fast(a: vec2<f32>, b: vec2<f32>, c: vec2<f32>) -> f32 {
     return abs(((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x))) * 0.5;
 }
 
-// Distance from point to quadratic bezier curve using sampling + Newton-Raphson
-fn dist_and_t_to_bezier(px: vec2<f32>, p0: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
-    // coarse sampling to get starting t
-    var best_d2 = 1e12;
-    var best_t = 0.0;
-
-    for (var i: u32 = 0u; i <= SAMPLE_COUNT; i = i + 1u) {
-        let t = f32(i) / f32(SAMPLE_COUNT);
-        let bt = bezier_point_from_coeffs(a, b, p0, t);
-        let d2 = dot(bt - px, bt - px);
-        if (d2 < best_d2) {
-            best_d2 = d2;
-            best_t = t;
-        }
-    }
-
-    // Newton-Raphson refine
-    var t = best_t;
-    for (var iter: i32 = 0; iter < NR_ITER; iter = iter + 1) {
-        let bt = a * t * t + b * t + p0;
-        let dBt = 2.0 * a * t + b;
-        let diff = bt - px;
-        let f = dot(diff, dBt);
-        let df = 2.0 * dot(dBt, dBt) + 2.0 * dot(diff, a);
-        if (abs(df) < 1e-6) { break; }
-        let dt = f / df;
-        if (abs(dt) < 1e-5) { break; }
-        t = t - dt;
-        // small safety clamp while refining
-        if (t < -0.1) { t = -0.1; }
-        if (t > 1.1)  { t = 1.1; }
-    }
-
-    let t_clamped = clamp(t, 0.0, 1.0);
-    let bt = a * t_clamped * t_clamped + b * t_clamped + p0;
-    let dist = length(bt - px);
-    return vec2<f32>(dist, t_clamped);
-}
-
 @fragment
 fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
-    let px = mix(in.v_mbr_min, in.v_mbr_max, in.v_uv);
-    let p0 = in.v_start;
-    let ctrl = in.v_center_ctrl;
-    let p2 = in.v_end;
+    let px = in.v_position_px;
+    let t = in.v_t;
+    let tip = in.v_curve_end;
+    var dir = normalize(in.v_tangent_at_end);
 
-    let a = in.v_quad_a;
-    let b = in.v_quad_b;
+    // Compute center point on the curve for this fragment's t
+    let center_pos = bezier_point(in.v_curve_start, in.v_ctrl, in.v_curve_end, t);
+    let dist_to_center = length(px - center_pos);
 
-    // Get distance and t to curve (t in [0..1])
-    let dt = dist_and_t_to_bezier(px, p0, a, b);
-    let dist = dt.x;
-    let t_closest = dt.y;
+    // AA smoothing across the curve thickness
+    let half_thickness = LINE_THICKNESS / 2.0;
+    var line_alpha = 1.0 - smoothstep(half_thickness - AA_SOFTNESS, half_thickness + AA_SOFTNESS, dist_to_center);
 
-    let EPS_T: f32 = 0.02;
-    if (t_closest < -EPS_T || t_closest > 1.0 + EPS_T) {
-        discard;
+    // Calculate physical distance from this fragment to the end point
+    let dist_to_end = length(px - tip);
+
+    // Default diamond/arrow shape length
+    var head_length_px = ARROW_LENGTH_PX;
+
+    if (in.v_line_type == 4u) {
+        // Diamond arrow for set operators
+        head_length_px = ARROW_LENGTH_PX * 2.0;
     }
-
-    // Anti-aliased line alpha
-    var line_alpha = 1.0 - smoothstep(LINE_THICKNESS - AA_SOFTNESS, LINE_THICKNESS + AA_SOFTNESS, dist);
-
-    // dashed/dotted pattern
+    
+    // Apply dash/dot pattern
     if (in.v_line_type == 1u || in.v_line_type == 2u || in.v_line_type == 4u) {
-        let pattern_repeats = in.v_approx_len / 10.0;
+        let chord_len = length(in.v_curve_end - in.v_curve_start);
+        let pattern_scale = max(1.0, chord_len / DASH_LENGTH_PX);
         let dot_fraction = 0.6;
-        let pattern_phase = fract(t_closest * pattern_repeats);
-        let fade = 0.05;
+        let pattern_phase = fract(t * pattern_scale);
+        let fade = AA_SOFTNESS * 0.05;
         let dot_mask = smoothstep(0.0, fade, pattern_phase) * (1.0 - smoothstep(dot_fraction, dot_fraction + fade, pattern_phase));
         line_alpha *= dot_mask;
     }
 
-    // Arrow calculation
-    var dir = in.v_tangent_at1;
-    var dir_len = length(dir);
-    if (dir_len < 1e-6) {
-        dir = normalize(p2 - p0);
-    } else {
-        dir = dir / dir_len;
-    }
-
-    var tip = p2;
-    let shape_type = i32(in.v_end_shape);
-    let dims = in.v_shape_dimensions;
-
-    if (shape_type == 1) {
-        // rectangle intersection fallback to shift tip inward
-        let rect_size = vec2<f32>(0.9, 0.25 * dims.y);
-        let half_size = rect_size;
-
-        // avoid divide-by-zero; small epsilon
-        let eps = 1e-6;
-        var safe_dir = dir;
-        if (abs(safe_dir.x) < eps) { safe_dir.x = sign(safe_dir.x) * eps; }
-        if (abs(safe_dir.y) < eps) { safe_dir.y = sign(safe_dir.y) * eps; }
-
-        let inv_dir = -1.0 / safe_dir;
-        let t1 = (-half_size) * inv_dir;
-        let t2 = (half_size) * inv_dir;
-        let tmin = max(min(t1.x, t2.x), min(t1.y, t2.y));
-        let tmax = min(max(t1.x, t2.x), max(t1.y, t2.y));
-
-        var t_hit = 0.0;
-        if (tmin <= tmax && tmax > 0.0) {
-            t_hit = tmax;
-        }
-
-        tip = p2 - dir * t_hit;
-    }
-
-    // No arrow for disjoint edges
-    if (in.v_line_type == 2u) {
-        return vec4<f32>(vec3<f32>(0.0), line_alpha);
-    }
-
-    // Arrow triangle geometry
-    let base_center = tip - dir * ARROW_LENGTH_PX;
-    let perp = vec2<f32>(-dir.y, dir.x);
-    let halfw = ARROW_WIDTH_PX * 0.5;
-    let left = base_center + perp * halfw;
-    let right = base_center - perp * halfw;
-
-    // Use cross-based triangle area
-    let area_total = tri_area_fast(tip, left, right);
-
-    // Barycentric-like test via area difference
-    let area_sub = tri_area_fast(px, left, right) + tri_area_fast(tip, px, right) + tri_area_fast(tip, left, px);
-    let area_diff = abs(area_sub - area_total);
-
-    var arrow_alpha: f32 = 1.0;
-    if (area_total > 1e-5) {
-        let normalized_diff = area_diff / area_total;
-        arrow_alpha = 1.0 - smoothstep(0.0, ARROW_AA, normalized_diff);
-    }
-
+    // --- Arrow Drawing Logic ---
+    var arrow_alpha: f32 = 0.0;
     var color = vec3<f32>(0.0);
     var arrow_color = vec3<f32>(0.0);
-
-    // blue line for AllValuesFrom and SomeValuesFrom
+    var inside_arrow = false;
+    
+    // Blue line for AllValuesFrom and SomeValuesFrom
     if (in.v_line_type == 3u) {
         color = vec3<f32>(0.4, 0.6, 0.8);
         arrow_color = vec3<f32>(0.4, 0.6, 0.8);
     }
 
-    var inside_arrow = arrow_alpha > 0.0;
+    // No arrow for disjoint edges (type 2)
+    if (in.v_line_type == 2u) {
+        return vec4<f32>(vec3<f32>(0.0), line_alpha);
+    }
 
-    // Make arrow white with black border for type 1
-    if (in.v_line_type == 1u && inside_arrow) {
-        // barycentric area weights
-        let w0 = tri_area_fast(px, left, right) / area_total;
-        let w1 = tri_area_fast(px, right, tip) / area_total;
-        let w2 = tri_area_fast(px, tip, left) / area_total;
-
-        let edge_dist = min(min(w0, w1), w2);
-        let edge_thickness = 2.0;
-        // normalized edge distance based on triangle size
-        let border_smooth = smoothstep(0.0, edge_thickness / ARROW_WIDTH_PX, edge_dist);
-        arrow_color = mix(vec3<f32>(0.0), vec3<f32>(1.0), border_smooth);
-    } else if (in.v_line_type == 4u) {
-        // diamond (two triangles) simplified: compute diamond centers and use same area test
+    if (in.v_line_type == 4u) {
+        // Diamond arrow for set operators
         let diamond_width_px = ARROW_WIDTH_PX + 5.0;
         let diamond_length_px = ARROW_LENGTH_PX * 2.0;
 
@@ -307,28 +145,31 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
         let diamond_left = diamond_center + perp_d * diamond_width_px * 0.5;
         let diamond_right = diamond_center - perp_d * diamond_width_px * 0.5;
 
-        // front triangle (tip, left, right)
+        // Front triangle
         let area1_total = tri_area_fast(diamond_tip, diamond_left, diamond_right);
-        let area1_sub = tri_area_fast(diamond_left, diamond_right, px) + tri_area_fast(diamond_tip, px, diamond_right) + tri_area_fast(diamond_tip, diamond_left, px);
+        let area1_sub = tri_area_fast(diamond_left, diamond_right, px) + 
+                        tri_area_fast(diamond_tip, px, diamond_right) + 
+                        tri_area_fast(diamond_tip, diamond_left, px);
         let area1_diff = abs(area1_sub - area1_total);
 
-        // back triangle (back, left, right)
+        // Back triangle
         let area2_total = tri_area_fast(diamond_back, diamond_left, diamond_right);
-        let area2_sub = tri_area_fast(diamond_left, diamond_right, px) + tri_area_fast(diamond_back, px, diamond_right) + tri_area_fast(diamond_back, diamond_left, px);
+        let area2_sub = tri_area_fast(diamond_left, diamond_right, px) + 
+                        tri_area_fast(diamond_back, px, diamond_right) + 
+                        tri_area_fast(diamond_back, diamond_left, px);
         let area2_diff = abs(area2_sub - area2_total);
 
         var diamond_alpha: f32 = 0.0;
         if (area1_total > 1e-5) {
             let norm_diff1 = area1_diff / area1_total;
-            diamond_alpha = max(diamond_alpha, 1.0 - smoothstep(0.0, ARROW_AA, norm_diff1));
+            diamond_alpha = max(diamond_alpha, 1.0 - smoothstep(0.0, AA_SOFTNESS, norm_diff1));
         }
         if (area2_total > 1e-5) {
             let norm_diff2 = area2_diff / area2_total;
-            diamond_alpha = max(diamond_alpha, 1.0 - smoothstep(0.0, ARROW_AA, norm_diff2));
+            diamond_alpha = max(diamond_alpha, 1.0 - smoothstep(0.0, AA_SOFTNESS, norm_diff2));
         }
 
         if (diamond_alpha > 0.0) {
-            // distance to diamond edges
             let dist1 = point_to_segment_dist(px, diamond_tip, diamond_left);
             let dist2 = point_to_segment_dist(px, diamond_tip, diamond_right);
             let dist3 = point_to_segment_dist(px, diamond_left, diamond_back);
@@ -340,6 +181,38 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
             arrow_color = mix(vec3<f32>(0.0), vec3<f32>(1.0), border_smooth);
             arrow_alpha = diamond_alpha;
             inside_arrow = true;
+        }
+    } else {
+        // Default triangle arrow
+        let base_center = tip - dir * ARROW_LENGTH_PX;
+        let perp = vec2<f32>(-dir.y, dir.x);
+        let halfw = ARROW_WIDTH_PX * 0.5;
+        let left = base_center + perp * halfw;
+        let right = base_center - perp * halfw;
+
+        // Use area-based triangle test
+        let area_total = tri_area_fast(tip, left, right);
+        let area_sub = tri_area_fast(px, left, right) + 
+                       tri_area_fast(tip, px, right) + 
+                       tri_area_fast(tip, left, px);
+        let area_diff = abs(area_sub - area_total);
+
+        if (area_total > 1e-5) {
+            let normalized_diff = area_diff / area_total;
+            arrow_alpha = 1.0 - smoothstep(0.0, AA_SOFTNESS, normalized_diff);
+        }
+        inside_arrow = arrow_alpha > 0.0;
+
+        // White arrow with black border for type 1 (SubclassOf)
+        if (in.v_line_type == 1u && inside_arrow) {
+            let w0 = tri_area_fast(px, left, right) / area_total;
+            let w1 = tri_area_fast(px, right, tip) / area_total;
+            let w2 = tri_area_fast(px, tip, left) / area_total;
+
+            let edge_dist = min(min(w0, w1), w2);
+            let edge_thickness = 2.0;
+            let border_smooth = smoothstep(0.0, edge_thickness / ARROW_WIDTH_PX, edge_dist);
+            arrow_color = mix(vec3<f32>(0.0), vec3<f32>(1.0), border_smooth);
         }
     }
 

@@ -51,8 +51,11 @@ pub struct State {
     // number of instances (length of node positions)
     num_instances: u32,
     edge_pipeline: wgpu::RenderPipeline,
-    edge_instance_buffer: wgpu::Buffer,
-    num_edge_instances: u32,
+    edge_vertex_buffer: wgpu::Buffer,
+    num_edge_vertices: u32,
+    arrow_pipeline: wgpu::RenderPipeline,
+    arrow_vertex_buffer: wgpu::Buffer,
+    num_arrow_vertices: u32,
 
     // Node and edge coordinates in pixels
     positions: Vec<[f32; 2]>,
@@ -84,7 +87,7 @@ pub struct State {
 
 impl State {
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
-        // Check if we can use WebGPU (as if this writing it's only enabled in some browsers)
+        // Check if we can use WebGPU (as of this writing it's only enabled in some browsers)
         let is_webgpu_enabled = wgpu::util::is_browser_webgpu_supported().await;
 
         // Pick appropriate render backends
@@ -528,14 +531,14 @@ impl State {
 
         let num_vertices = VERTICES.len() as u32;
 
-        let edge_instance_buffer = vertex_buffer::create_edge_instance_buffer(
-            &device,
-            &edges,
-            &positions,
-            &node_shapes,
-            &node_types,
-        );
-        let num_edge_instances = edges.len() as u32;
+        let (edge_vertex_buffer, num_edge_vertices, arrow_vertex_buffer, num_arrow_vertices) =
+            vertex_buffer::create_edge_vertex_buffer(
+                &device,
+                &edges,
+                &positions,
+                &node_shapes,
+                &node_types,
+            );
 
         let edge_shader =
             device.create_shader_module(wgpu::include_wgsl!("./renderer/edge_shader.wgsl"));
@@ -546,7 +549,45 @@ impl State {
             vertex: wgpu::VertexState {
                 module: &edge_shader,
                 entry_point: Some("vs_edge_main"),
-                buffers: &[Vertex::desc(), vertex_buffer::EdgeInstance::desc()],
+                buffers: &[vertex_buffer::EdgeVertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &edge_shader,
+                entry_point: Some("fs_edge_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
+        let arrow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Arrow Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &edge_shader,
+                entry_point: Some("vs_edge_main"),
+                buffers: &[vertex_buffer::EdgeVertex::desc()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -563,12 +604,9 @@ impl State {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
+                cull_mode: None,
                 polygon_mode: wgpu::PolygonMode::Fill,
-                // Requires Features::DEPTH_CLIP_CONTROL
                 unclipped_depth: false,
-                // Requires Features::CONSERVATIVE_RASTERIZATION
                 conservative: false,
             },
             depth_stencil: None,
@@ -667,8 +705,11 @@ impl State {
             node_instance_buffer,
             num_instances,
             edge_pipeline,
-            edge_instance_buffer,
-            num_edge_instances,
+            edge_vertex_buffer,
+            num_edge_vertices,
+            arrow_pipeline,
+            arrow_vertex_buffer,
+            num_arrow_vertices,
             positions: positions.to_vec(),
             labels,
             edges: edges.to_vec(),
@@ -1141,10 +1182,15 @@ impl State {
 
             // Draw edges
             render_pass.set_pipeline(&self.edge_pipeline);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..)); // quad
-            render_pass.set_vertex_buffer(1, self.edge_instance_buffer.slice(..));
+            render_pass.set_vertex_buffer(0, self.edge_vertex_buffer.slice(..));
             render_pass.set_bind_group(0, &self.bind_group0, &[]);
-            render_pass.draw(0..self.num_vertices, 0..self.num_edge_instances);
+            render_pass.draw(0..self.num_edge_vertices, 0..1);
+
+            // Draw arrow geometry on top of the line strips
+            render_pass.set_pipeline(&self.arrow_pipeline);
+            render_pass.set_vertex_buffer(0, self.arrow_vertex_buffer.slice(..));
+            render_pass.set_bind_group(0, &self.bind_group0, &[]);
+            render_pass.draw(0..self.num_arrow_vertices, 0..1);
 
             // Draw nodes
             render_pass.set_pipeline(&self.render_pipeline);
@@ -1202,7 +1248,8 @@ impl State {
             &self.node_shapes,
         );
 
-        let edge_instances = vertex_buffer::build_edge_instances(
+        // Build separate line and arrow vertices and write to their respective buffers
+        let (edge_vertices, arrow_vertices) = vertex_buffer::build_line_and_arrow_vertices(
             &self.edges,
             &self.positions,
             &self.node_shapes,
@@ -1210,11 +1257,15 @@ impl State {
         );
 
         self.queue.write_buffer(
-            &self.edge_instance_buffer,
+            &self.edge_vertex_buffer,
             0,
-            bytemuck::cast_slice(&edge_instances),
+            bytemuck::cast_slice(&edge_vertices),
         );
-
+        self.queue.write_buffer(
+            &self.arrow_vertex_buffer,
+            0,
+            bytemuck::cast_slice(&arrow_vertices),
+        );
         self.queue.write_buffer(
             &self.node_instance_buffer,
             0,
