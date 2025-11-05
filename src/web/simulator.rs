@@ -194,7 +194,7 @@ impl SimulatorBuilder {
 
     /// How strong the spring force should be.
     ///
-    /// Default: `100.0`
+    /// Default: `300.0`
     pub fn spring_stiffness(mut self, spring_stiffness: f32) -> Self {
         self.spring_stiffness = spring_stiffness;
         self
@@ -207,7 +207,7 @@ impl SimulatorBuilder {
     ///
     /// Set to `0` if edges should always pull apart.
     ///
-    /// Default: `2.0`
+    /// Default: `70.0`
     pub fn spring_neutral_length(mut self, neutral_length: f32) -> Self {
         self.spring_neutral_length = neutral_length;
         self
@@ -215,7 +215,7 @@ impl SimulatorBuilder {
 
     /// How strong the pull to the center should be.
     ///
-    /// Default: `1.0`
+    /// Default: `30.0`
     pub fn gravity_force(mut self, gravity_force: f32) -> Self {
         self.gravity_force = gravity_force;
         self
@@ -223,7 +223,7 @@ impl SimulatorBuilder {
 
     /// How strong nodes should push others away.
     ///
-    /// Default: `100.0`
+    /// Default: `10e7`
     pub fn repel_force(mut self, repel_force_const: f32) -> Self {
         self.repel_force = repel_force_const;
         self
@@ -235,7 +235,7 @@ impl SimulatorBuilder {
     ///
     /// `0.0` -> No Movement
     ///
-    /// Default: `0.9`
+    /// Default: `0.8`
     pub fn damping(mut self, damping: f32) -> Self {
         self.damping = damping;
         self
@@ -257,7 +257,7 @@ impl SimulatorBuilder {
     /// Freeze nodes when their velocity falls below `freeze_thresh`.
     /// Set to `-1` to disable
     ///
-    /// Default: `1e-2`
+    /// Default: `10.0`
     pub fn freeze_threshold(mut self, freeze_thresh: f32) -> Self {
         self.freeze_thresh = freeze_thresh;
         self
@@ -281,7 +281,12 @@ impl SimulatorBuilder {
     }
 
     /// Constructs a instance of `Simulator`
-    pub fn build<'a, 'b>(self, nodes: Vec<Vec2>, edges: Vec<[u32; 2]>) -> Simulator<'a, 'b> {
+    pub fn build<'a, 'b>(
+        self,
+        nodes: Vec<Vec2>,
+        edges: Vec<[u32; 2]>,
+        sizes: Vec<f32>,
+    ) -> Simulator<'a, 'b> {
         let mut world = World::new();
         let mut dispatcher = DispatcherBuilder::new()
             .with(QuadTreeConstructor, "quadtree_constructor", &[])
@@ -313,7 +318,7 @@ impl SimulatorBuilder {
             .build();
 
         dispatcher.setup(&mut world);
-        Self::create_entities(&mut world, nodes, edges);
+        Self::create_entities(&mut world, nodes, edges, sizes);
         self.add_ressources(&mut world);
 
         let mut event_channel = EventChannel::<SimulatorEvent>::new();
@@ -341,16 +346,16 @@ impl SimulatorBuilder {
         world.insert(PointIntersection::default());
     }
 
-    fn create_entities(world: &mut World, nodes: Vec<Vec2>, edges: Vec<[u32; 2]>) {
+    fn create_entities(world: &mut World, nodes: Vec<Vec2>, edges: Vec<[u32; 2]>, sizes: Vec<f32>) {
         let mut node_entities = Vec::with_capacity(nodes.len());
 
         // Create node entities
-        for node in nodes {
+        for (i, node) in nodes.iter().enumerate() {
             let node_entity = world
                 .create_entity()
-                .with(Position(node))
+                .with(Position(*node))
                 .with(Velocity::default())
-                .with(Mass::default())
+                .with(Mass(sizes[i]))
                 .with(NodeForces::default())
                 .build();
             node_entities.push(node_entity);
@@ -384,13 +389,13 @@ impl Default for SimulatorBuilder {
     fn default() -> Self {
         Self {
             repel_force: 10e7, // Do not make this value greater or equal 10e8
-            spring_stiffness: 100.0,
-            spring_neutral_length: 200.0,
-            gravity_force: 20.0,
-            delta_time: 0.005,
+            spring_stiffness: 300.0,
+            spring_neutral_length: 70.0,
+            gravity_force: 30.0,
+            delta_time: 0.01,
             damping: 0.8,
             quadtree_theta: 0.0,
-            freeze_thresh: 20.0,
+            freeze_thresh: 0.0,
         }
     }
 }
