@@ -194,7 +194,7 @@ impl State {
         });
 
         // TODO: remove test code after adding simulator
-        const SIZE: i64 = 10e2 as i64;
+        const SIZE: i64 = 10e3 as i64;
         const USIZE: usize = SIZE as usize;
         let mut positions: Vec<[f32; 2]> = Vec::with_capacity(USIZE);
         let labels = vec![
@@ -225,12 +225,45 @@ impl State {
             String::new(),
             String::new(),
         ];
+        let mut node_shapes: Vec<NodeShape> = Vec::with_capacity(USIZE);
         let mut node_types: Vec<NodeType> = Vec::with_capacity(USIZE);
         let mut node_iter = NodeType::iter().cycle();
         for i in 0..SIZE {
             positions.push([(i % 1000) as f32, (i % 1000) as f32]);
+            let mut next_item = node_iter.next().unwrap();
+
+            match next_item {
+                NodeType::Class
+                | NodeType::ExternalClass
+                | NodeType::Thing
+                | NodeType::EquivalentClass
+                | NodeType::Union
+                | NodeType::DisjointUnion
+                | NodeType::Intersection
+                | NodeType::Complement
+                | NodeType::DeprecatedClass
+                | NodeType::AnonymousClass
+                | NodeType::RdfsClass
+                | NodeType::RdfsResource => node_shapes.push(NodeShape::Circle { r: 1.0 }),
+                NodeType::Literal
+                | NodeType::Datatype
+                | NodeType::ObjectProperty
+                | NodeType::DatatypeProperty
+                | NodeType::SubclassOf
+                | NodeType::InverseProperty
+                | NodeType::DisjointWith
+                | NodeType::RdfProperty
+                | NodeType::DeprecatedProperty
+                | NodeType::ExternalProperty
+                | NodeType::ValuesFrom
+                | NodeType::NoDraw => {
+                    node_shapes.push(NodeShape::Rectangle { w: 1.0, h: 1.0 });
+                    next_item = NodeType::DeprecatedClass;
+                }
+            }
+
+            node_types.push(next_item)
             // labels.push(format!("Class {i}"));
-            node_types.push(node_iter.next().unwrap());
         }
 
         let edges = [
@@ -262,7 +295,6 @@ impl State {
             )));
         font_system.db_mut().set_sans_serif_family("DejaVu Sans");
 
-        let mut node_shapes = node_shapes;
         let mut labels = labels;
 
         // iterate over labels and update the width of corresponding rectangle nodes
@@ -699,7 +731,7 @@ impl State {
                     let mut labels: Vec<&str> = label.split('\n').collect();
                     let label1 = labels.get(0).map_or("", |v| *v);
                     let eq_labels = labels.split_off(1);
-                    let (last_label, eq_labels) = eq_labels.split_last().unwrap();
+                    let (last_label, eq_labels) = eq_labels.split_last().unwrap_or((&"", &[]));
 
                     let mut eq_labels_attributes: Vec<(&str, _)> = Vec::new();
                     for eq_label in eq_labels {
