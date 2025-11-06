@@ -1,6 +1,7 @@
 pub mod components;
 pub mod ressources;
 mod systems;
+use crate::web::prelude::EVENT_DISPATCHER;
 use crate::web::{
     quadtree::{BoundingBox2D, QuadTree},
     simulator::{
@@ -84,11 +85,9 @@ type EventSystemData<'a> = (
     Write<'a, FreezeThreshold>,
 );
 
-//#[warn(dead_code = false)]
 pub struct Simulator<'a, 'b> {
     pub world: World,
     dispatcher: Dispatcher<'a, 'b>,
-    event_channel: EventChannel<SimulatorEvent>,
     /// Event channel reader ID
     reader_id: ReaderId<SimulatorEvent>,
 }
@@ -100,15 +99,11 @@ impl<'a, 'b> Simulator<'a, 'b> {
 
     pub fn tick(&mut self) {
         self.dispatcher.dispatch(&self.world);
-        Self::handle_simulator_event(&self.world, &self.event_channel, &mut self.reader_id);
+        Self::handle_simulator_event(&self.world, &mut self.reader_id);
         self.world.maintain();
     }
 
-    fn handle_simulator_event(
-        world: &World,
-        event_channel: &EventChannel<SimulatorEvent>,
-        reader_id: &mut ReaderId<SimulatorEvent>,
-    ) {
+    fn handle_simulator_event(world: &World, reader_id: &mut ReaderId<SimulatorEvent>) {
         let event_data: EventSystemData = world.system_data();
         let (
             mut repel_force,
@@ -121,7 +116,7 @@ impl<'a, 'b> Simulator<'a, 'b> {
             mut freeze_threshold,
         ) = event_data;
 
-        for event in event_channel.read(reader_id) {
+        for event in EVENT_DISPATCHER.sim_chan.read().unwrap().read(reader_id) {
             match event {
                 SimulatorEvent::RepelForceUpdated(value) => repel_force.0 = *value,
                 SimulatorEvent::SpringStiffnessUpdated(value) => spring_stiffness.0 = *value,
@@ -167,10 +162,6 @@ impl<'a, 'b> Simulator<'a, 'b> {
                 }
             }
         }
-    }
-
-    pub fn send_event(&mut self, event: SimulatorEvent) {
-        self.event_channel.single_write(event);
     }
 }
 
@@ -321,12 +312,10 @@ impl SimulatorBuilder {
         Self::create_entities(&mut world, nodes, edges, sizes);
         self.add_ressources(&mut world);
 
-        let mut event_channel = EventChannel::<SimulatorEvent>::new();
-        let reader_id = event_channel.register_reader();
+        let reader_id = EVENT_DISPATCHER.sim_chan.write().unwrap().register_reader();
         Simulator {
             world,
             dispatcher,
-            event_channel,
             reader_id,
         }
     }

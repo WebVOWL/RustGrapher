@@ -3,8 +3,8 @@ mod node_types;
 mod vertex_buffer;
 
 use crate::web::{
-    renderer::node_shape::NodeShape,
-    renderer::node_types::NodeType,
+    prelude::EVENT_DISPATCHER,
+    renderer::{node_shape::NodeShape, node_types::NodeType},
     simulator::{Simulator, components::nodes::Position, ressources::events::SimulatorEvent},
 };
 use glam::Vec2;
@@ -899,10 +899,12 @@ impl State {
             self.queue
                 .write_buffer(&self.resolution_buffer, 0, bytemuck::cast_slice(&data));
 
-            self.simulator.send_event(SimulatorEvent::WindowResized {
-                width: width,
-                height: height,
-            });
+            EVENT_DISPATCHER.sim_chan.write().unwrap().single_write(
+                SimulatorEvent::WindowResized {
+                    width: width,
+                    height: height,
+                },
+            );
         }
     }
 
@@ -1236,23 +1238,23 @@ impl State {
         match (button, is_pressed) {
             (MouseButton::Left, true) => {
                 // Begin node dragging on mouse click
-                // if !self.paused {
                 if let Some(pos) = self.cursor_position {
                     self.node_dragged = true;
-                    self.simulator.send_event(SimulatorEvent::DragStart(pos));
-
-                    // self.simulator.drag_start(pos);
-                    // }
+                    EVENT_DISPATCHER
+                        .sim_chan
+                        .write()
+                        .unwrap()
+                        .single_write(SimulatorEvent::DragStart(pos));
                 }
             }
             (MouseButton::Left, false) => {
                 // Stop node dragging on mouse release
-                // if !self.paused {
                 self.node_dragged = false;
-                self.simulator.send_event(SimulatorEvent::DragEnd);
-
-                // self.simulator.drag_end();
-                // }
+                EVENT_DISPATCHER
+                    .sim_chan
+                    .write()
+                    .unwrap()
+                    .single_write(SimulatorEvent::DragEnd);
             }
             (MouseButton::Right, false) => {
                 // Radial menu on mouse release
@@ -1265,9 +1267,11 @@ impl State {
         self.cursor_position = Some(Vec2::new(position.x as f32, position.y as f32));
         if self.node_dragged {
             if let Some(pos) = self.cursor_position {
-                self.simulator.send_event(SimulatorEvent::Dragged(pos));
-
-                // self.simulator.dragging(pos);
+                EVENT_DISPATCHER
+                    .sim_chan
+                    .write()
+                    .unwrap()
+                    .single_write(SimulatorEvent::Dragged(pos));
             }
         }
     }

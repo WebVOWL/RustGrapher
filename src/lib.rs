@@ -17,6 +17,9 @@
 //!renderer.create_window();
 //! ```
 
+#![allow(dead_code)]
+#![allow(unused)]
+
 #[cfg(target_arch = "x86_64")]
 pub mod native;
 
