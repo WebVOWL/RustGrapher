@@ -28,7 +28,6 @@
     glam="0.29.0"
     glyphon={git="https://github.com/grovesNL/glyphon", rev="de4b5b8"}
     log="0.4.0"
-
     rayon="1.10.0"
     wgpu={version="27.0.1", default-features=false, features=[
         "webgl",
