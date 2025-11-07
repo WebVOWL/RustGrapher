@@ -25,8 +25,14 @@ struct VertOut {
     @location(9) v_ctrl: vec2<f32>,          // Control point for quadratic Bezier
 };
 
+struct ViewUniforms {
+    resolution: vec2<f32>,
+    pan: vec2<f32>,
+    zoom: f32,
+};
+
 @group(0) @binding(0)
-var<uniform> u_resolution: vec4<f32>; // xy = screen size
+var<uniform> u_view: ViewUniforms;
 
 // Arrow constants (pixels)
 const ARROW_LENGTH_PX: f32 = 10.0;
@@ -44,10 +50,20 @@ fn bezier_point(p0: vec2<f32>, ctrl: vec2<f32>, p2: vec2<f32>, t: f32) -> vec2<f
 fn vs_edge_main(in: VertIn) -> VertOut {
     var out: VertOut;
 
-    // Convert pixel position to NDC
-    let ndc = (in.position / u_resolution.xy) * 2.0 - vec2<f32>(1.0, 1.0);
+    let world_pos = in.position;
+
+    // View Transform for clip_position
+    let world_rel = world_pos - u_view.pan;
+    let world_rel_zoomed_px = world_rel * u_view.zoom;
+    let screen_center_px = u_view.resolution * 0.5;
+    let screen_offset_px = vec2<f32>(world_rel_zoomed_px.x, -world_rel_zoomed_px.y);
+    let screen = screen_center_px + screen_offset_px;
     
-    out.clip_position = vec4<f32>(ndc, 0.0, 1.0);
+    let ndc_x = (screen.x / u_view.resolution.x) * 2.0 - 1.0;
+    let ndc_y = 1.0 - (screen.y / u_view.resolution.y) * 2.0;
+    out.clip_position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
+
+    // Pass vertex attributes
     out.v_t = in.t_param;
     out.v_side = in.side;
     out.v_line_type = in.line_type;
@@ -56,7 +72,7 @@ fn vs_edge_main(in: VertIn) -> VertOut {
     out.v_curve_start = in.curve_start;
     out.v_curve_end = in.curve_end;
     out.v_tangent_at_end = in.tangent_at_end;
-    out.v_position_px = in.position;
+    out.v_position_px = world_pos; // Pass WORLD position
     out.v_ctrl = in.ctrl;
 
     return out;
@@ -81,7 +97,7 @@ fn tri_area_fast(a: vec2<f32>, b: vec2<f32>, c: vec2<f32>) -> f32 {
 
 @fragment
 fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
-    let px = in.v_position_px;
+    let px = in.v_position_px; // World space
     let t = in.v_t;
     let tip = in.v_curve_end;
     var dir = normalize(in.v_tangent_at_end);
@@ -90,9 +106,15 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     let center_pos = bezier_point(in.v_curve_start, in.v_ctrl, in.v_curve_end, t);
     let dist_to_center = length(px - center_pos);
 
+    // Convert pixel-space constants to world-space
+    let line_thickness_world = LINE_THICKNESS * u_view.zoom;
+    let aa_softness_world = AA_SOFTNESS / u_view.zoom;
+
     // AA smoothing across the curve thickness
-    let half_thickness = LINE_THICKNESS / 2.0;
-    var line_alpha = 1.0 - smoothstep(half_thickness - AA_SOFTNESS, half_thickness + AA_SOFTNESS, dist_to_center);
+    let half_thickness_world = line_thickness_world / 2.0;
+    var line_alpha = 1.0 - smoothstep(half_thickness_world - aa_softness_world, 
+                                    half_thickness_world + aa_softness_world, 
+                                    dist_to_center);
 
     // Calculate physical distance from this fragment to the end point
     let dist_to_end = length(px - tip);
@@ -103,7 +125,7 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
         let pattern_scale = max(1.0, chord_len / DASH_LENGTH_PX);
         let dot_fraction = 0.6;
         let pattern_phase = fract(t * pattern_scale);
-        let fade = AA_SOFTNESS * 0.025;
+        let fade = aa_softness_world * 0.025;
         let dot_mask = smoothstep(0.0, fade, pattern_phase) * (1.0 - smoothstep(dot_fraction, dot_fraction + fade, pattern_phase));
         line_alpha *= dot_mask;
     }
@@ -154,11 +176,11 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
         var diamond_alpha: f32 = 0.0;
         if (area1_total > 1e-5) {
             let norm_diff1 = area1_diff / area1_total;
-            diamond_alpha = max(diamond_alpha, 1.0 - smoothstep(0.0, AA_SOFTNESS, norm_diff1));
+            diamond_alpha = max(diamond_alpha, 1.0 - smoothstep(0.0, aa_softness_world, norm_diff1));
         }
         if (area2_total > 1e-5) {
             let norm_diff2 = area2_diff / area2_total;
-            diamond_alpha = max(diamond_alpha, 1.0 - smoothstep(0.0, AA_SOFTNESS, norm_diff2));
+            diamond_alpha = max(diamond_alpha, 1.0 - smoothstep(0.0, aa_softness_world, norm_diff2));
         }
 
         if (diamond_alpha > 0.0) {
@@ -191,7 +213,7 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
 
         if (area_total > 1e-5) {
             let normalized_diff = area_diff / area_total;
-            arrow_alpha = 1.0 - smoothstep(0.0, AA_SOFTNESS, normalized_diff);
+            arrow_alpha = 1.0 - smoothstep(0.0, aa_softness_world, normalized_diff);
         }
         inside_arrow = arrow_alpha > 0.0;
 

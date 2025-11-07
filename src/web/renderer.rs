@@ -17,7 +17,7 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use specs::shrev::EventChannel;
 use specs::{Join, WorldExt};
 use std::{cmp::min, collections::HashMap, sync::Arc};
-use vertex_buffer::{NodeInstance, VERTICES, Vertex};
+use vertex_buffer::{NodeInstance, VERTICES, Vertex, ViewUniforms};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 use wgpu::{Face, util::DeviceExt};
@@ -43,7 +43,8 @@ pub struct State {
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     num_vertices: u32,
-    resolution_buffer: wgpu::Buffer,
+    view_uniform_buffer: wgpu::Buffer,
+    view_uniforms: ViewUniforms, // Store CPU-side copy
     // bind group for group(0): binding 0 = resolution uniform only
     bind_group0: wgpu::BindGroup,
     // instance buffer with node positions (array<vec2<f32>>), bound as vertex buffer slot 1
@@ -72,6 +73,10 @@ pub struct State {
     // User input
     cursor_position: Option<Vec2>,
     node_dragged: bool,
+    pan_active: bool,
+    last_pan_position: Option<Vec2>, // Screen space
+    pan: Vec2,
+    zoom: f32,
 
     // Glyphon resources are initialized lazily when we have a non-zero surface.
     font_system: Option<FontSystem>,
@@ -176,7 +181,7 @@ impl State {
                     // binding 0: resolution uniform (vec4<f32>) used in vertex shader
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
@@ -187,11 +192,17 @@ impl State {
                 ],
             });
 
-        // Create resolution uniform buffer
-        let resolution_data = [size.width as f32, size.height as f32, 0.0f32, 0.0f32];
-        let resolution_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Resolution Buffer"),
-            contents: bytemuck::cast_slice(&resolution_data),
+        // Create View uniform buffer
+        let view_uniforms = ViewUniforms {
+            resolution: [size.width as f32, size.height as f32],
+            pan: [0.0, 0.0],
+            zoom: 1.0,
+            _padding: 0.0,
+        };
+
+        let view_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("View Uniform Buffer"),
+            contents: bytemuck::cast_slice(&[view_uniforms]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -465,7 +476,7 @@ impl State {
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &resolution_buffer,
+                    buffer: &view_uniform_buffer,
                     offset: 0,
                     size: None,
                 }),
@@ -538,6 +549,7 @@ impl State {
                 &positions,
                 &node_shapes,
                 &node_types,
+                1.0,
             );
 
         let edge_shader =
@@ -700,7 +712,8 @@ impl State {
             render_pipeline,
             vertex_buffer,
             num_vertices,
-            resolution_buffer,
+            view_uniform_buffer,
+            view_uniforms,
             bind_group0,
             node_instance_buffer,
             num_instances,
@@ -722,6 +735,10 @@ impl State {
             paused: false,
             cursor_position: None,
             node_dragged: false,
+            pan_active: false,
+            last_pan_position: None,
+            pan: Vec2::ZERO,
+            zoom: 1.0,
             font_system,
             swash_cache,
             viewport,
@@ -737,6 +754,30 @@ impl State {
         }
 
         Ok(state)
+    }
+    // --- Coordinate Conversion Helpers ---
+
+    /// Converts screen-space pixel coordinates (Y-down) to world-space coordinates (Y-up)
+    fn screen_to_world(&self, screen_pos: Vec2) -> Vec2 {
+        let screen_center = Vec2::new(
+            self.config.width as f32 / 2.0,
+            self.config.height as f32 / 2.0,
+        );
+        let screen_offset_px = screen_pos - screen_center;
+        let world_rel_zoomed = Vec2::new(screen_offset_px.x, -screen_offset_px.y);
+        let world_rel = world_rel_zoomed / self.zoom;
+        world_rel + self.pan
+    }
+
+    /// Converts world-space coordinates (Y-up) to screen-space pixel coordinates (Y-down)
+    fn world_to_screen(&self, world_pos: Vec2) -> Vec2 {
+        let screen_center = Vec2::new(
+            self.config.width as f32 / 2.0,
+            self.config.height as f32 / 2.0,
+        );
+        let world_rel = world_pos - self.pan;
+        let screen_offset_px = Vec2::new(world_rel.x, -world_rel.y) * self.zoom;
+        screen_center + screen_offset_px
     }
 
     // Initialize glyphon resources and create one text buffer per node.
@@ -935,11 +976,6 @@ impl State {
                 self.init_glyphon();
             }
 
-            // update GPU resolution uniform
-            let data = [width as f32, height as f32, 0.0f32, 0.0f32];
-            self.queue
-                .write_buffer(&self.resolution_buffer, 0, bytemuck::cast_slice(&data));
-
             self.simulator.send_event(SimulatorEvent::WindowResized {
                 width: width,
                 height: height,
@@ -954,35 +990,20 @@ impl State {
             return Ok(());
         }
 
-        // If glyphon isn't initialized yet, skip text rendering for now.
-        if let (
-            Some(font_system),
-            Some(swash_cache),
-            Some(viewport),
-            Some(atlas),
-            Some(text_renderer),
-            Some(text_buffers),
-        ) = (
-            self.font_system.as_mut(),
-            self.swash_cache.as_mut(),
-            self.viewport.as_mut(),
-            self.atlas.as_mut(),
-            self.text_renderer.as_mut(),
-            self.text_buffers.as_ref(),
-        ) {
-            let scale = self.window.scale_factor() as f32;
-            // physical viewport height in pixels:
-            let vp_h_px = self.config.height as f32 * scale as f32;
-            let vp_w_px = self.config.width as f32 * scale as f32;
+        // Calculate text areas
+        let mut areas: Vec<TextArea> = Vec::new();
+        let scale = self.window.scale_factor() as f32;
+        let vp_h_px = self.config.height as f32 * scale as f32;
+        let vp_w_px = self.config.width as f32 * scale as f32;
 
-            let mut areas: Vec<TextArea> = Vec::new();
+        if let Some(text_buffers) = self.text_buffers.as_ref() {
             for (i, buf) in text_buffers.iter().enumerate() {
                 // node logical coords
                 let node_logical = match self.node_types[i] {
                     NodeType::InverseProperty => {
                         let position_x = self.positions[i][0];
                         let position_y = self.positions[i][1] + 18.0;
-                        [position_x, position_y]
+                        Vec2::new(position_x, position_y)
                     }
                     NodeType::Complement
                     | NodeType::DisjointUnion
@@ -990,162 +1011,184 @@ impl State {
                     | NodeType::Intersection => {
                         let position_x = self.positions[i][0];
                         let position_y = self.positions[i][1] + 24.0;
-                        [position_x, position_y]
+                        Vec2::new(position_x, position_y)
                     }
-                    _ => self.positions[i],
+                    _ => Vec2::new(self.positions[i][0], self.positions[i][1]),
                 };
 
                 // convert node coords to physical pixels
-                let node_x_px = node_logical[0] * scale;
-                let node_y_px = vp_h_px - node_logical[1] * scale;
-
-                // skip text rendering for nodes outside the viewport
-                if node_x_px < -50.0
-                    || node_x_px > vp_w_px + 50.0
-                    || node_y_px < -50.0
-                    || node_y_px > vp_h_px + 50.0
-                {
-                    continue;
-                }
+                let screen_pos_logical = self.world_to_screen(node_logical);
+                let node_x_px = screen_pos_logical.x * scale;
+                let node_y_px = screen_pos_logical.y * scale;
 
                 let (label_w_opt, label_h_opt) = buf.size();
                 let label_w = label_w_opt.unwrap_or(96.0) as f32;
                 let label_h = label_h_opt.unwrap_or(24.0) as f32;
 
-                // center horizontally on node
-                let left = node_x_px - label_w * 0.5;
+                // skip text rendering for nodes outside the viewport
+                if node_x_px < -(label_w / 2.0)
+                    || node_x_px > vp_w_px + (label_w / 2.0)
+                    || node_y_px < -(label_h / 2.0)
+                    || node_y_px > vp_h_px + (label_h / 2.0)
+                {
+                    continue;
+                }
 
-                let line_height = 8.0;
+                let scaled_label_w = label_w * self.zoom;
+                let scaled_label_h = label_h * self.zoom;
+
+                // center horizontally on node
+                let left = node_x_px - scaled_label_w * 0.5;
+
+                let line_height = 8.0; // Base physical pixels
                 // top = distance from top in physical pixels
                 let top = match self.node_types[i] {
-                    NodeType::EquivalentClass => node_y_px - 2.0 * line_height,
-                    _ => node_y_px - line_height,
+                    NodeType::EquivalentClass => node_y_px - 2.0 * line_height * self.zoom,
+                    _ => node_y_px - line_height * self.zoom,
                 };
 
                 areas.push(TextArea {
                     buffer: buf,
                     left,
                     top,
-                    scale: 1.0,
+                    scale: self.zoom,
                     bounds: TextBounds {
                         left: left as i32,
                         top: top as i32,
-                        right: (left + label_w) as i32,
-                        bottom: (top + label_h) as i32,
+                        right: (left + scaled_label_w) as i32,
+                        bottom: (top + scaled_label_h) as i32,
                     },
                     default_color: Color::rgb(0, 0, 0),
                     custom_glyphs: &[],
                 });
             }
+        }
 
-            // cardinalities
-            if let Some(card_buffers) = self.cardinality_text_buffers.as_ref() {
-                for (edge_idx, buf) in card_buffers.iter() {
-                    // make sure edge index is valid
-                    if *edge_idx >= self.edges.len() {
-                        continue;
-                    }
-                    let edge = self.edges[*edge_idx];
-                    let center_idx = edge[1];
-                    let end_idx = edge[2];
-
-                    // node logical coords
-                    let center_log = self.positions[center_idx];
-                    let end_log = self.positions[end_idx];
-
-                    // convert to physical pixels
-                    let center_x_px = center_log[0] * scale;
-                    let center_y_px = vp_h_px - center_log[1] * scale;
-                    let end_x_px = end_log[0] * scale;
-                    let end_y_px = vp_h_px - end_log[1] * scale;
-
-                    // direction vector (center - start) in physical pixel space
-                    let dir_x = center_x_px - end_x_px;
-                    let dir_y = center_y_px - end_y_px;
-                    let radius_pix: f32 = 50.0;
-
-                    let (offset_px_x, offset_px_y) = match self.node_shapes[end_idx] {
-                        NodeShape::Circle { r } => (
-                            (radius_pix + 15.0) * r * scale,
-                            (radius_pix + 15.0) * r * scale,
-                        ),
-                        NodeShape::Rectangle { w, h } => {
-                            let half_w_px = (w * 0.9 / 2.0) * radius_pix;
-                            let half_h_px = (h * 0.25 / 2.0) * radius_pix;
-
-                            let len = (dir_x * dir_x + dir_y * dir_y).sqrt().max(1.0);
-                            let nx = dir_x / len;
-                            let ny = dir_y / len;
-
-                            // Compute intersection with rectangle perimeter in direction (nx, ny)
-                            let tx = if nx.abs() > 1e-6 {
-                                half_w_px / nx.abs()
-                            } else {
-                                f32::INFINITY
-                            };
-                            let ty = if ny.abs() > 1e-6 {
-                                half_h_px / ny.abs()
-                            } else {
-                                f32::INFINITY
-                            };
-
-                            // Intersection distance is the smaller of the two
-                            let t = tx.min(ty);
-
-                            // Add padding to place the label away from the edge
-                            let padding = 45.0;
-                            let dist = t + padding;
-
-                            // Return the final scalar distance for both axes
-                            (dist, dist)
-                        }
-                    };
-
-                    // normalized direction (guard against zero-length)
-                    let len = (dir_x * dir_x + dir_y * dir_y).sqrt().max(1.0);
-                    let nx: f32 = dir_x / len;
-                    let ny = dir_y / len;
-
-                    // place label at end node plus offset along the center-->end angle
-                    let card_x_px = end_x_px + nx * offset_px_x;
-                    let card_y_px = end_y_px + ny * offset_px_y;
-
-                    // skip text rendering for cardinalities outside the viewport
-                    let vp_h_px = self.config.height as f32 * scale as f32;
-                    let vp_w_px = self.config.width as f32 * scale as f32;
-                    if card_x_px < -10.0
-                        || card_x_px > vp_w_px + 10.0
-                        || card_y_px < -10.0
-                        || card_y_px > vp_h_px + 10.0
-                    {
-                        continue;
-                    }
-
-                    // compute bounds from buffer size and center the label
-                    let (label_w_opt, label_h_opt) = buf.size();
-                    let label_w = label_w_opt.unwrap_or(48.0) as f32;
-                    let label_h = label_h_opt.unwrap_or(24.0) as f32;
-
-                    let left = card_x_px - label_w * 0.5;
-                    let top = card_y_px - label_h * 0.5;
-
-                    areas.push(TextArea {
-                        buffer: buf,
-                        left,
-                        top,
-                        scale: 1.0,
-                        bounds: TextBounds {
-                            left: left as i32,
-                            top: top as i32,
-                            right: (left + label_w) as i32,
-                            bottom: (top + label_h) as i32,
-                        },
-                        default_color: Color::rgb(0, 0, 0),
-                        custom_glyphs: &[],
-                    });
+        // cardinalities
+        if let Some(card_buffers) = self.cardinality_text_buffers.as_ref() {
+            for (edge_idx, buf) in card_buffers.iter() {
+                // make sure edge index is valid
+                if *edge_idx >= self.edges.len() {
+                    continue;
                 }
-            }
+                let edge = self.edges[*edge_idx];
+                let center_idx = edge[1];
+                let end_idx = edge[2];
 
+                // node logical coords
+                let center_log_world =
+                    Vec2::new(self.positions[center_idx][0], self.positions[center_idx][1]);
+                let end_log_world =
+                    Vec2::new(self.positions[end_idx][0], self.positions[end_idx][1]);
+
+                // direction vector (center - end) in WORLD space
+                let dir_world_x = center_log_world.x - end_log_world.x;
+                let dir_world_y = center_log_world.y - end_log_world.y;
+
+                let radius_world: f32 = 50.0;
+                let padding_world = 15.0;
+                let padding_world_rect = 45.0;
+
+                let (offset_world_x, offset_world_y) = match self.node_shapes[end_idx] {
+                    NodeShape::Circle { r } => (
+                        (radius_world + padding_world) * r,
+                        (radius_world + padding_world) * r,
+                    ),
+                    NodeShape::Rectangle { w, h } => {
+                        let half_w_world = (w * 0.9 / 2.0) * radius_world;
+                        let half_h_world = (h * 0.25 / 2.0) * radius_world;
+
+                        let len_world = (dir_world_x * dir_world_x + dir_world_y * dir_world_y)
+                            .sqrt()
+                            .max(1.0);
+                        let nx_world = dir_world_x / len_world;
+                        let ny_world = dir_world_y / len_world;
+
+                        // Compute intersection with rectangle perimeter in direction (nx, ny)
+                        let tx = if nx_world.abs() > 1e-6 {
+                            half_w_world / nx_world.abs()
+                        } else {
+                            f32::INFINITY
+                        };
+                        let ty = if ny_world.abs() > 1e-6 {
+                            half_h_world / ny_world.abs()
+                        } else {
+                            f32::INFINITY
+                        };
+                        let t = tx.min(ty);
+
+                        let dist = t + padding_world_rect;
+                        (dist, dist)
+                    }
+                };
+                // normalized world direction (guard against zero-length)
+                let len_world = (dir_world_x * dir_world_x + dir_world_y * dir_world_y)
+                    .sqrt()
+                    .max(1.0);
+                let nx_world = dir_world_x / len_world;
+                let ny_world = dir_world_y / len_world;
+
+                // place label at end node plus offset (IN WORLD SPACE)
+                let card_world_x = end_log_world.x + nx_world * offset_world_x;
+                let card_world_y = end_log_world.y + ny_world * offset_world_y;
+
+                // NOW convert this final world pos to screen physical pos
+                let card_world_pos = Vec2::new(card_world_x, card_world_y);
+                let card_screen_phys = self.world_to_screen(card_world_pos) * scale;
+
+                let card_x_px = card_screen_phys.x;
+                let card_y_px = card_screen_phys.y;
+
+                // skip text rendering for cardinalities outside the viewport
+                if card_x_px < -10.0
+                    || card_x_px > vp_w_px + 10.0
+                    || card_y_px < -10.0
+                    || card_y_px > vp_h_px + 10.0
+                {
+                    continue;
+                }
+
+                // compute bounds from buffer size and center the label
+                let (label_w_opt, label_h_opt) = buf.size();
+                let label_w = label_w_opt.unwrap_or(48.0) as f32;
+                let label_h = label_w_opt.unwrap_or(24.0) as f32;
+
+                let scaled_label_w = label_w * self.zoom;
+                let scaled_label_h = label_h * self.zoom;
+
+                let left = card_x_px - scaled_label_w * 0.5;
+                let top = card_y_px - scaled_label_h * 0.5;
+                areas.push(TextArea {
+                    buffer: buf,
+                    left,
+                    top,
+                    scale: self.zoom,
+                    bounds: TextBounds {
+                        left: left as i32,
+                        top: top as i32,
+                        right: (left + scaled_label_w) as i32,
+                        bottom: (top + scaled_label_h) as i32,
+                    },
+                    default_color: Color::rgb(0, 0, 0),
+                    custom_glyphs: &[],
+                });
+            }
+        }
+
+        // If glyphon isn't initialized yet, skip text rendering for now.
+        if let (
+            Some(font_system),
+            Some(swash_cache),
+            Some(viewport),
+            Some(atlas),
+            Some(text_renderer),
+        ) = (
+            self.font_system.as_mut(),
+            self.swash_cache.as_mut(),
+            self.viewport.as_mut(),
+            self.atlas.as_mut(),
+            self.text_renderer.as_mut(),
+        ) {
             viewport.update(
                 &self.queue,
                 Resolution {
@@ -1153,6 +1196,8 @@ impl State {
                     height: vp_h_px as u32,
                 },
             );
+            // Clear atlas before preparing text to prevent overflow
+            atlas.trim();
             // Prepare glyphon for rendering
             if let Err(e) = text_renderer.prepare(
                 &self.device,
@@ -1246,6 +1291,16 @@ impl State {
             self.simulator.tick();
         }
 
+        // Update uniforms
+        self.view_uniforms.pan = self.pan.to_array();
+        self.view_uniforms.zoom = self.zoom;
+        self.view_uniforms.resolution = [self.config.width as f32, self.config.height as f32];
+        self.queue.write_buffer(
+            &self.view_uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[self.view_uniforms]),
+        );
+
         let positions = self.simulator.world.read_storage::<Position>();
         let entities = self.simulator.world.entities();
         for (i, (_, position)) in (&entities, &positions).join().enumerate() {
@@ -1273,6 +1328,7 @@ impl State {
             &self.positions,
             &self.node_shapes,
             &self.node_types,
+            self.zoom,
         );
 
         self.queue.write_buffer(
@@ -1308,37 +1364,102 @@ impl State {
                 // Begin node dragging on mouse click
                 // if !self.paused {
                 if let Some(pos) = self.cursor_position {
-                    self.node_dragged = true;
-                    self.simulator.send_event(SimulatorEvent::DragStart(pos));
-
-                    // self.simulator.drag_start(pos);
-                    // }
+                    if !self.pan_active {
+                        self.node_dragged = true;
+                        // Convert screen coordinates to world coordinates
+                        let pos_world = self.screen_to_world(pos);
+                        self.simulator
+                            .send_event(SimulatorEvent::DragStart(pos_world));
+                    }
                 }
             }
             (MouseButton::Left, false) => {
                 // Stop node dragging on mouse release
-                // if !self.paused {
-                self.node_dragged = false;
-                self.simulator.send_event(SimulatorEvent::DragEnd);
-
-                // self.simulator.drag_end();
-                // }
+                if self.node_dragged {
+                    self.node_dragged = false;
+                    self.simulator.send_event(SimulatorEvent::DragEnd);
+                }
+            }
+            (MouseButton::Right, true) => {
+                // Start panning
+                if let Some(pos) = self.cursor_position {
+                    if !self.node_dragged {
+                        self.pan_active = true;
+                        self.last_pan_position = Some(pos);
+                    }
+                }
             }
             (MouseButton::Right, false) => {
-                // Radial menu on mouse release
+                // Stop panning
+                self.pan_active = false;
+                self.last_pan_position = None;
             }
             _ => {}
         }
     }
     pub fn handle_cursor(&mut self, position: PhysicalPosition<f64>) {
         // (x,y) coords in pixels relative to the top-left corner of the window
-        self.cursor_position = Some(Vec2::new(position.x as f32, position.y as f32));
-        if self.node_dragged {
-            if let Some(pos) = self.cursor_position {
-                self.simulator.send_event(SimulatorEvent::Dragged(pos));
+        let pos_screen = Vec2::new(position.x as f32, position.y as f32);
+        self.cursor_position = Some(pos_screen);
 
-                // self.simulator.dragging(pos);
+        if self.node_dragged {
+            // Convert screen coordinates to world coordinates before sending to simulator
+            let pos_world = self.screen_to_world(pos_screen);
+            self.simulator
+                .send_event(SimulatorEvent::Dragged(pos_world));
+        } else if self.pan_active {
+            if let Some(last_pos_screen) = self.last_pan_position {
+                // 1. Get the world position of the cursor now.
+                let world_pos_current = self.screen_to_world(pos_screen);
+
+                // 2. Get the world position of the cursor at its last position.
+                let world_pos_last = self.screen_to_world(last_pos_screen);
+
+                // 3. The difference is the true world-space delta.
+                let delta_world = world_pos_current - world_pos_last;
+
+                // 4. Adjust the pan by this delta.
+                self.pan -= delta_world;
+
+                // 5. Update the last position.
+                self.last_pan_position = Some(pos_screen);
             }
         }
+    }
+
+    pub fn handle_scroll(&mut self, delta: MouseScrollDelta) {
+        let scroll_amount = match delta {
+            MouseScrollDelta::LineDelta(_, y) => y,
+            MouseScrollDelta::PixelDelta(PhysicalPosition { y, .. }) => (y / 10.0) as f32, // Heuristic
+        };
+        if scroll_amount == 0.0 {
+            return;
+        }
+
+        let cursor_pos_screen = match self.cursor_position {
+            Some(pos) => pos,
+            None => return,
+        };
+
+        // 1. Get world pos under cursor before zoom
+        let world_pos_before = self.screen_to_world(cursor_pos_screen);
+
+        // 2. Calculate new zoom
+        let zoom_sensitivity = 0.1;
+        self.zoom *= 1.0 - scroll_amount * zoom_sensitivity; // scroll up (positive y) = zoom in
+        self.zoom = self.zoom.clamp(0.1, 4.0); // Min/max zoom levels
+
+        // 3. We want the world_pos_before to stay at cursor_pos_screen.
+        //    Find the new pan that makes this true.
+        //    P_new = W_before - (S_cursor - C) / Z_new
+
+        let screen_center = Vec2::new(
+            self.config.width as f32 / 2.0,
+            self.config.height as f32 / 2.0,
+        );
+        let screen_offset = cursor_pos_screen - screen_center;
+        let world_rel_zoomed = Vec2::new(screen_offset.x, -screen_offset.y);
+
+        self.pan = world_pos_before - (world_rel_zoomed / self.zoom);
     }
 }

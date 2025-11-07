@@ -219,14 +219,8 @@ pub struct DraggingSystemData<'a> {
 /// The position of the dragged node has changed.
 pub fn sys_dragging(data: DraggingSystemData) {
     for (entity, pos, _) in (&data.entities, &data.positions, &data.dragged).join() {
-        // We're calling updater instead of using the position write storage
-        // as it doesn't seem to actually work in a custom system context.
-        let norm_pos = norm_pos(
-            data.cursor_position.0,
-            [data.world_size.width, data.world_size.height],
-        );
+        let world_pos = data.cursor_position.0;
 
-        data.updater.insert(entity, Position(norm_pos));
-        info!("[{0}] Dragged position: {1}", entity.id(), norm_pos,);
+        data.updater.insert(entity, Position(world_pos));
     }
 }

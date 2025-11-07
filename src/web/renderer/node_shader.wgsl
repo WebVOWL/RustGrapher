@@ -14,8 +14,14 @@ struct VertOut {
     @location(3) v_shape_dimensions: vec2<f32>,
 };
 
+struct ViewUniforms {
+    resolution: vec2<f32>,
+    pan: vec2<f32>,
+    zoom: f32,
+};
+
 @group(0) @binding(0)
-var<uniform> u_resolution: vec4<f32>; // xy = pixel resolution
+var<uniform> u_view: ViewUniforms;
 
 // per-instance radius fixed
 const NODE_RADIUS_PIX = 50.0; // pixels
@@ -27,8 +33,6 @@ fn vs_node_main(
 ) -> VertOut {
     var out: VertOut;
 
-    let pos_px = in.inst_pos;
-
     // compute non-uniform scale for shape geometry
     var scale_xy = vec2<f32>(in.shape_dimensions.x, in.shape_dimensions.y);
     if (in.shape == 0u) {
@@ -36,12 +40,18 @@ fn vs_node_main(
         scale_xy = vec2<f32>(in.shape_dimensions.x, in.shape_dimensions.x);
     }
 
-    // offset for screen-space positioning
-    let offset_px = in.quad_pos * (NODE_RADIUS_PIX * scale_xy);
-    let screen = pos_px + offset_px;
+    // World-space point 
+    let world_pos = in.inst_pos + in.quad_pos * (NODE_RADIUS_PIX * scale_xy);
 
-    let ndc_x = (screen.x / u_resolution.x) * 2.0 - 1.0;
-    let ndc_y = (screen.y / u_resolution.y) * 2.0 - 1.0;
+    // View Transform
+    let world_rel = world_pos - u_view.pan;
+    let world_rel_zoomed_px = world_rel * u_view.zoom;
+    let screen_center_px = u_view.resolution * 0.5;
+    let screen_offset_px = vec2<f32>(world_rel_zoomed_px.x, -world_rel_zoomed_px.y);
+    let screen = screen_center_px + screen_offset_px;
+    
+    let ndc_x = (screen.x / u_view.resolution.x) * 2.0 - 1.0;
+    let ndc_y = 1.0 - (screen.y / u_view.resolution.y) * 2.0;
     out.clip_position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
 
     let aspect = vec2<f32>(in.quad_pos.x, in.quad_pos.y);

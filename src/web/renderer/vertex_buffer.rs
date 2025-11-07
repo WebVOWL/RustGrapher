@@ -6,6 +6,16 @@ use crate::web::renderer::{node_shape::NodeShape, node_types::NodeType};
 // Number of segments to divide each Bézier curve into for strip generation
 const BEZIER_SEGMENTS: usize = 24;
 
+// --- Uniforms ---
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ViewUniforms {
+    pub resolution: [f32; 2],
+    pub pan: [f32; 2],
+    pub zoom: f32,
+    pub _padding: f32, // WGSL struct padding
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
@@ -177,6 +187,7 @@ pub fn build_line_and_arrow_vertices(
     node_positions: &[[f32; 2]],
     node_shapes: &[NodeShape],
     node_types: &[NodeType],
+    zoom: f32,
 ) -> (Vec<EdgeVertex>, Vec<EdgeVertex>) {
     const LINE_THICKNESS: f32 = 1.5;
     const ARROW_LENGTH_PX: f32 = 10.0;
@@ -330,10 +341,7 @@ pub fn build_line_and_arrow_vertices(
         // Calculate tangent at end for arrow
         let tangent_at_end = normalize(bezier_tangent(start, ctrl, end, 1.0));
 
-        // Determine whether this edge should have an arrow drawn
-        let has_arrow = line_type != 2;
-
-        // Generate strip vertices but stop before arrow region when has_arrow == true
+        // Generate strip vertices
         let mut first_strip = line_vertices.is_empty();
 
         if !first_strip {
@@ -352,7 +360,7 @@ pub fn build_line_and_arrow_vertices(
             let dist_to_end = ((point[0] - end[0]).powi(2) + (point[1] - end[1]).powi(2)).sqrt();
 
             // push left and right vertices for the strip
-            let thickness = LINE_THICKNESS;
+            let thickness = LINE_THICKNESS * zoom;
             let left = [
                 point[0] + perp[0] * thickness,
                 point[1] + perp[1] * thickness,
@@ -404,90 +412,87 @@ pub fn build_line_and_arrow_vertices(
             });
         }
 
-        // Only build arrow geometry when an arrow will be drawn for this edge
-        if has_arrow {
-            // Build arrow geometry at the tip
-            let tip = end;
-            let dir = normalize(tangent_at_end);
-            let perp = [-dir[1], dir[0]];
+        // Build arrow geometry at the tip
+        let tip = end;
+        let dir = normalize(tangent_at_end);
+        let perp = [-dir[1], dir[0]];
 
-            if line_type == 4 {
-                // Diamond: generate two triangles
-                let diamond_length = SHADER_DIAMOND_LENGTH_PX;
-                let diamond_width = SHADER_DIAMOND_WIDTH_PX;
-                let diamond_tip = tip;
-                let diamond_center = [
-                    tip[0] - dir[0] * diamond_length * 0.5,
-                    tip[1] - dir[1] * diamond_length * 0.5,
-                ];
-                let diamond_back = [
-                    tip[0] - dir[0] * diamond_length,
-                    tip[1] - dir[1] * diamond_length,
-                ];
-                let diamond_left = [
-                    diamond_center[0] + perp[0] * diamond_width * 0.5,
-                    diamond_center[1] + perp[1] * diamond_width * 0.5,
-                ];
-                let diamond_right = [
-                    diamond_center[0] - perp[0] * diamond_width * 0.5,
-                    diamond_center[1] - perp[1] * diamond_width * 0.5,
-                ];
+        if line_type == 4 {
+            // Diamond: generate two triangles
+            let diamond_length = SHADER_DIAMOND_LENGTH_PX;
+            let diamond_width = SHADER_DIAMOND_WIDTH_PX;
+            let diamond_tip = tip;
+            let diamond_center = [
+                tip[0] - dir[0] * diamond_length * 0.5,
+                tip[1] - dir[1] * diamond_length * 0.5,
+            ];
+            let diamond_back = [
+                tip[0] - dir[0] * diamond_length,
+                tip[1] - dir[1] * diamond_length,
+            ];
+            let diamond_left = [
+                diamond_center[0] + perp[0] * diamond_width * 0.5,
+                diamond_center[1] + perp[1] * diamond_width * 0.5,
+            ];
+            let diamond_right = [
+                diamond_center[0] - perp[0] * diamond_width * 0.5,
+                diamond_center[1] - perp[1] * diamond_width * 0.5,
+            ];
 
-                let common = |pos: [f32; 2]| EdgeVertex {
-                    position: pos,
-                    t_param: 1.0,
-                    side: 0.0,
-                    line_type,
-                    end_shape_type,
-                    end_shape_dim,
-                    curve_start: start,
-                    curve_end: end,
-                    tangent_at_end,
-                    ctrl,
-                };
+            let common = |pos: [f32; 2]| EdgeVertex {
+                position: pos,
+                t_param: 1.0,
+                side: 0.0,
+                line_type,
+                end_shape_type,
+                end_shape_dim,
+                curve_start: start,
+                curve_end: end,
+                tangent_at_end,
+                ctrl,
+            };
 
-                // Triangle 1: tip, left, right
-                arrow_vertices.push(common(diamond_tip));
-                arrow_vertices.push(common(diamond_left));
-                arrow_vertices.push(common(diamond_right));
+            // Triangle 1: tip, left, right
+            arrow_vertices.push(common(diamond_tip));
+            arrow_vertices.push(common(diamond_left));
+            arrow_vertices.push(common(diamond_right));
 
-                // Triangle 2: back, right, left
-                arrow_vertices.push(common(diamond_back));
-                arrow_vertices.push(common(diamond_right));
-                arrow_vertices.push(common(diamond_left));
-            } else {
-                // Simple triangular arrowhead
-                let base_center = [
-                    tip[0] - dir[0] * ARROW_LENGTH_PX,
-                    tip[1] - dir[1] * ARROW_LENGTH_PX,
-                ];
-                let halfw = ARROW_WIDTH_PX * 0.5;
-                let left = [
-                    base_center[0] + perp[0] * halfw,
-                    base_center[1] + perp[1] * halfw,
-                ];
-                let right = [
-                    base_center[0] - perp[0] * halfw,
-                    base_center[1] - perp[1] * halfw,
-                ];
+            // Triangle 2: back, right, left
+            arrow_vertices.push(common(diamond_back));
+            arrow_vertices.push(common(diamond_right));
+            arrow_vertices.push(common(diamond_left));
+        } else {
+            // Simple triangular arrowhead
+            let base_center = [
+                tip[0] - dir[0] * ARROW_LENGTH_PX,
+                tip[1] - dir[1] * ARROW_LENGTH_PX,
+            ];
+            let halfw = ARROW_WIDTH_PX * 0.5;
+            let left = [
+                base_center[0] + perp[0] * halfw,
+                base_center[1] + perp[1] * halfw,
+            ];
+            let right = [
+                base_center[0] - perp[0] * halfw,
+                base_center[1] - perp[1] * halfw,
+            ];
 
-                let common = |pos: [f32; 2]| EdgeVertex {
-                    position: pos,
-                    t_param: 1.0,
-                    side: 0.0,
-                    line_type,
-                    end_shape_type,
-                    end_shape_dim,
-                    curve_start: start,
-                    curve_end: end,
-                    tangent_at_end,
-                    ctrl,
-                };
+            let common = |pos: [f32; 2]| EdgeVertex {
+                position: pos,
+                t_param: 1.0,
+                side: 0.0,
+                line_type,
+                end_shape_type,
+                end_shape_dim,
+                curve_start: start,
+                curve_end: end,
+                tangent_at_end,
+                ctrl,
+            };
 
-                arrow_vertices.push(common(tip));
-                arrow_vertices.push(common(left));
-                arrow_vertices.push(common(right));
-            }
+            arrow_vertices.push(common(tip));
+            arrow_vertices.push(common(left));
+            arrow_vertices.push(common(right));
         }
     }
 
@@ -500,10 +505,11 @@ pub fn create_edge_vertex_buffer(
     node_positions: &[[f32; 2]],
     node_shapes: &[NodeShape],
     node_types: &[NodeType],
+    zoom: f32,
 ) -> (wgpu::Buffer, u32, wgpu::Buffer, u32) {
     // Build separate vertex lists
     let (line_vertices, arrow_vertices) =
-        build_line_and_arrow_vertices(edges, node_positions, node_shapes, node_types);
+        build_line_and_arrow_vertices(edges, node_positions, node_shapes, node_types, zoom);
 
     let line_count = line_vertices.len() as u32;
     let arrow_count = arrow_vertices.len() as u32;
