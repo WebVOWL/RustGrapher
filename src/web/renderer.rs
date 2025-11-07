@@ -1025,17 +1025,17 @@ impl State {
                 let label_w = label_w_opt.unwrap_or(96.0) as f32;
                 let label_h = label_h_opt.unwrap_or(24.0) as f32;
 
+                let scaled_label_w = label_w * self.zoom;
+                let scaled_label_h = label_h * self.zoom;
+
                 // skip text rendering for nodes outside the viewport
-                if node_x_px < -(label_w / 2.0)
-                    || node_x_px > vp_w_px + (label_w / 2.0)
-                    || node_y_px < -(label_h / 2.0)
-                    || node_y_px > vp_h_px + (label_h / 2.0)
+                if node_x_px < -(scaled_label_w / 2.0)
+                    || node_x_px > vp_w_px + (scaled_label_w / 2.0)
+                    || node_y_px < -(scaled_label_h / 2.0)
+                    || node_y_px > vp_h_px + (scaled_label_h / 2.0)
                 {
                     continue;
                 }
-
-                let scaled_label_w = label_w * self.zoom;
-                let scaled_label_h = label_h * self.zoom;
 
                 // center horizontally on node
                 let left = node_x_px - scaled_label_w * 0.5;
@@ -1128,25 +1128,16 @@ impl State {
                 let nx_world = dir_world_x / len_world;
                 let ny_world = dir_world_y / len_world;
 
-                // place label at end node plus offset (IN WORLD SPACE)
+                // place label at end node plus offset
                 let card_world_x = end_log_world.x + nx_world * offset_world_x;
                 let card_world_y = end_log_world.y + ny_world * offset_world_y;
 
-                // NOW convert this final world pos to screen physical pos
+                // now convert this final world pos to screen physical pos
                 let card_world_pos = Vec2::new(card_world_x, card_world_y);
                 let card_screen_phys = self.world_to_screen(card_world_pos) * scale;
 
                 let card_x_px = card_screen_phys.x;
                 let card_y_px = card_screen_phys.y;
-
-                // skip text rendering for cardinalities outside the viewport
-                if card_x_px < -10.0
-                    || card_x_px > vp_w_px + 10.0
-                    || card_y_px < -10.0
-                    || card_y_px > vp_h_px + 10.0
-                {
-                    continue;
-                }
 
                 // compute bounds from buffer size and center the label
                 let (label_w_opt, label_h_opt) = buf.size();
@@ -1155,6 +1146,15 @@ impl State {
 
                 let scaled_label_w = label_w * self.zoom;
                 let scaled_label_h = label_h * self.zoom;
+
+                // skip text rendering for cardinalities outside the viewport
+                if card_x_px < -scaled_label_w
+                    || card_x_px > vp_w_px + scaled_label_w
+                    || card_y_px < -scaled_label_h
+                    || card_y_px > vp_h_px + scaled_label_h
+                {
+                    continue;
+                }
 
                 let left = card_x_px - scaled_label_w * 0.5;
                 let top = card_y_px - scaled_label_h * 0.5;

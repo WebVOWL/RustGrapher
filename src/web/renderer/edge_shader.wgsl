@@ -107,7 +107,7 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     let dist_to_center = length(px - center_pos);
 
     // Convert pixel-space constants to world-space
-    let line_thickness_world = LINE_THICKNESS * u_view.zoom;
+    let line_thickness_world = LINE_THICKNESS * u_view.zoom * 0.5;
     let aa_softness_world = AA_SOFTNESS / u_view.zoom;
 
     // AA smoothing across the curve thickness
