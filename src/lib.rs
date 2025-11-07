@@ -17,11 +17,11 @@
 //!renderer.create_window();
 //! ```
 
-#![allow(dead_code)]
-#![allow(unused)]
+// #![allow(dead_code)]
+// #![allow(unused)]
 
-#[cfg(target_arch = "x86_64")]
-pub mod native;
+// #[cfg(target_arch = "x86_64")]
+// pub mod native;
 
-#[cfg(target_arch = "wasm32")]
+// #[cfg(target_arch = "wasm32")]
 pub mod web;
