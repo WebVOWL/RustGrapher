@@ -1029,10 +1029,10 @@ impl State {
                 let scaled_label_h = label_h * self.zoom;
 
                 // skip text rendering for nodes outside the viewport
-                if node_x_px < -(scaled_label_w / 2.0)
-                    || node_x_px > vp_w_px + (scaled_label_w / 2.0)
-                    || node_y_px < -(scaled_label_h / 2.0)
-                    || node_y_px > vp_h_px + (scaled_label_h / 2.0)
+                if node_x_px < -(scaled_label_w * 0.5)
+                    || node_x_px > vp_w_px + (scaled_label_w * 0.5)
+                    || node_y_px < -(scaled_label_h * 0.5)
+                    || node_y_px > vp_h_px + (scaled_label_h * 0.5)
                 {
                     continue;
                 }
@@ -1148,10 +1148,10 @@ impl State {
                 let scaled_label_h = label_h * self.zoom;
 
                 // skip text rendering for cardinalities outside the viewport
-                if card_x_px < -scaled_label_w
-                    || card_x_px > vp_w_px + scaled_label_w
-                    || card_y_px < -scaled_label_h
-                    || card_y_px > vp_h_px + scaled_label_h
+                if card_x_px < -scaled_label_w * 0.5
+                    || card_x_px > vp_w_px + scaled_label_w * 0.5
+                    || card_y_px < -scaled_label_h * 0.5
+                    || card_y_px > vp_h_px + scaled_label_h * 0.5
                 {
                     continue;
                 }
@@ -1362,7 +1362,6 @@ impl State {
         match (button, is_pressed) {
             (MouseButton::Left, true) => {
                 // Begin node dragging on mouse click
-                // if !self.paused {
                 if let Some(pos) = self.cursor_position {
                     if !self.pan_active {
                         self.node_dragged = true;

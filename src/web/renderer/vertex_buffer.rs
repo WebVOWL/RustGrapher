@@ -360,7 +360,7 @@ pub fn build_line_and_arrow_vertices(
             let dist_to_end = ((point[0] - end[0]).powi(2) + (point[1] - end[1]).powi(2)).sqrt();
 
             // push left and right vertices for the strip
-            let thickness = LINE_THICKNESS * zoom;
+            let thickness = LINE_THICKNESS;
             let left = [
                 point[0] + perp[0] * thickness,
                 point[1] + perp[1] * thickness,
