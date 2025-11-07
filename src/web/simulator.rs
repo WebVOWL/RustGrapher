@@ -85,6 +85,8 @@ type EventSystemData<'a> = (
     Write<'a, FreezeThreshold>,
 );
 
+type FixedSystemData<'a> = (Entities<'a>, ReadStorage<'a, Fixed>, Read<'a, LazyUpdate>);
+
 pub struct Simulator<'a, 'b> {
     pub world: World,
     dispatcher: Dispatcher<'a, 'b>,
@@ -116,7 +118,9 @@ impl<'a, 'b> Simulator<'a, 'b> {
             mut freeze_threshold,
         ) = event_data;
 
+        let mut event_received = false;
         for event in EVENT_DISPATCHER.sim_chan.read().unwrap().read(reader_id) {
+            event_received = true;
             match event {
                 SimulatorEvent::RepelForceUpdated(value) => repel_force.0 = *value,
                 SimulatorEvent::SpringStiffnessUpdated(value) => spring_stiffness.0 = *value,
@@ -124,7 +128,7 @@ impl<'a, 'b> Simulator<'a, 'b> {
                 SimulatorEvent::GravityForceUpdated(value) => gravity_force.0 = *value,
                 SimulatorEvent::DeltaTimeUpdated(value) => deltatime.0 = *value,
                 SimulatorEvent::DampingUpdated(value) => damping.0 = *value,
-                SimulatorEvent::SimulationAccuracyUpdated(value) => quadtree_theta.0 = *value,
+                SimulatorEvent::QuadTreeThetaUpdated(value) => quadtree_theta.0 = *value,
                 SimulatorEvent::FreezeThresholdUpdated(value) => freeze_threshold.0 = *value,
                 SimulatorEvent::WindowResized { width, height } => {
                     let mut world_size = world.fetch_mut::<WorldSize>();
@@ -153,7 +157,7 @@ impl<'a, 'b> Simulator<'a, 'b> {
                     {
                         let mut cursor_position = world.fetch_mut::<CursorPosition>();
                         cursor_position.0 = *cursor_pos;
-                        info!("(EM) CP: {0}", cursor_pos)
+                        // info!("(EM) CP: {0}", cursor_pos)
                     }
                     {
                         let dragging_data: DraggingSystemData = world.system_data();
@@ -161,6 +165,15 @@ impl<'a, 'b> Simulator<'a, 'b> {
                     }
                 }
             }
+        }
+        // Enable simulation when simulation params are updated
+        if event_received {
+            let fixed_data: FixedSystemData = world.system_data();
+            let (entities, fixed, updater) = fixed_data;
+
+            (&entities, &fixed).par_join().for_each(|(entity, _)| {
+                updater.remove::<Fixed>(entity);
+            });
         }
     }
 }
@@ -374,17 +387,17 @@ impl SimulatorBuilder {
 }
 
 impl Default for SimulatorBuilder {
-    /// Get a Instance of `SimulatorBuilder` with default values
+    /// Get an instance of `SimulatorBuilder` with default values
     fn default() -> Self {
         Self {
             repel_force: 10e7, // Do not make this value greater or equal 10e8
             spring_stiffness: 300.0,
             spring_neutral_length: 70.0,
             gravity_force: 30.0,
-            delta_time: 0.01,
+            delta_time: 0.005,
             damping: 0.8,
-            quadtree_theta: 0.0,
-            freeze_thresh: 0.0,
+            quadtree_theta: 0.8,
+            freeze_thresh: 10.0,
         }
     }
 }
