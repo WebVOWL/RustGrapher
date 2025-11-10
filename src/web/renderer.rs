@@ -413,7 +413,7 @@ impl State {
                 },
                 None => {}
             }
-            let mut current_text = label_text.clone();
+            let current_text = label_text.clone();
 
             temp_buffer.set_wrap(&mut font_system, glyphon::Wrap::Word);
             temp_buffer.set_size(&mut font_system, Some(capped_width), None);
@@ -667,7 +667,7 @@ impl State {
         }
 
         let mut sim_nodes = Vec::with_capacity(positions.len());
-        for (i, pos) in positions.iter().enumerate() {
+        for pos in positions.iter() {
             sim_nodes.push(Vec2::new(pos[0], pos[1]));
         }
 
@@ -685,7 +685,7 @@ impl State {
             }
         }
 
-        let mut simulator = Simulator::builder().build(sim_nodes, sim_edges, sim_sizes);
+        let simulator = Simulator::builder().build(sim_nodes, sim_edges, sim_sizes);
 
         // Glyphon: do not create heavy glyphon resources unless we have a non-zero surface.
         // Initialize them lazily below (or on first resize).
@@ -1147,7 +1147,7 @@ impl State {
                 let card_y_px = card_screen_phys.y;
 
                 // compute bounds from buffer size and center the label
-                let (label_w_opt, label_h_opt) = buf.size();
+                let (label_w_opt, _label_h_opt) = buf.size();
                 let label_w = label_w_opt.unwrap_or(48.0) as f32;
                 let label_h = label_w_opt.unwrap_or(24.0) as f32;
 
