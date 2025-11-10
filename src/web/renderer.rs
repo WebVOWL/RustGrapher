@@ -976,11 +976,6 @@ impl State {
                 self.init_glyphon();
             }
 
-            // update GPU resolution uniform
-            let data = [width as f32, height as f32, 0.0f32, 0.0f32];
-            self.queue
-                .write_buffer(&self.resolution_buffer, 0, bytemuck::cast_slice(&data));
-
             EVENT_DISPATCHER.sim_chan.write().unwrap().single_write(
                 SimulatorEvent::WindowResized {
                     width: width,
@@ -1378,7 +1373,7 @@ impl State {
                             .sim_chan
                             .write()
                             .unwrap()
-                            .single_write(SimulatorEvent::DragStart(pos));
+                            .single_write(SimulatorEvent::DragStart(pos_world));
                     }
                 }
             }
