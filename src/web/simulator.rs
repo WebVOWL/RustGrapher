@@ -386,14 +386,14 @@ impl Default for SimulatorBuilder {
     /// Get an instance of `SimulatorBuilder` with default values
     fn default() -> Self {
         Self {
-            repel_force: 10e7, // Do not make this value greater or equal 10e8
-            spring_stiffness: 200.0,
-            spring_neutral_length: 80.0,
-            gravity_force: 7.5,
-            delta_time: 0.02,
-            damping: 0.8,
-            quadtree_theta: 0.8,
-            freeze_thresh: 10.0,
+            repel_force: RepelForce::default().0,
+            spring_stiffness: SpringStiffness::default().0,
+            spring_neutral_length: SpringNeutralLength::default().0,
+            gravity_force: GravityForce::default().0,
+            delta_time: DeltaTime::default().0,
+            damping: Damping::default().0,
+            quadtree_theta: QuadTreeTheta::default().0,
+            freeze_thresh: FreezeThreshold::default().0,
         }
     }
 }
