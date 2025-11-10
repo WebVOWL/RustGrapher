@@ -51,7 +51,7 @@ impl Default for RepelForce {
 
 impl Default for SpringStiffness {
     fn default() -> Self {
-        Self(300.0)
+        Self(400.0)
     }
 }
 
@@ -63,7 +63,7 @@ impl Default for SpringNeutralLength {
 
 impl Default for GravityForce {
     fn default() -> Self {
-        Self(30.0)
+        Self(10.0)
     }
 }
 
