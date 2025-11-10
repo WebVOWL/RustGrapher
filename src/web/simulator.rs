@@ -8,7 +8,7 @@ use crate::web::{
         components::{
             edges::Connects,
             forces::NodeForces,
-            nodes::{Dragged, Fixed, Mass, Position, Velocity},
+            nodes::{Fixed, Mass, Position, Velocity},
         },
         ressources::{
             events::SimulatorEvent,
@@ -31,16 +31,12 @@ use crate::web::{
     },
 };
 use glam::Vec2;
-use log::info;
 use rayon::prelude::*;
-use specs::prelude::*;
-use specs::shrev::EventChannel;
 use specs::{
-    Builder, Dispatcher, DispatcherBuilder, Entities, Join, LazyUpdate, ParJoin, Read, ReadExpect,
-    ReadStorage, ReaderId, System, World, WorldExt, Write, WriteStorage,
+    Builder, Dispatcher, DispatcherBuilder, Entities, Join, LazyUpdate, ParJoin, Read, ReadStorage,
+    ReaderId, System, World, WorldExt, Write,
 };
-use std::{collections::HashMap, iter::Enumerate};
-use winit::dpi::PhysicalSize;
+use std::collections::HashMap;
 
 struct QuadTreeConstructor;
 

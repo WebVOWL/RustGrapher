@@ -1,34 +1,14 @@
-use crate::web::{
-    quadtree::{BoundingBox2D, QuadTree},
-    simulator::{
-        components::{
-            edges::Connects,
-            forces::NodeForces,
-            nodes::{Dragged, Fixed, Mass, Position, Velocity},
-        },
-        ressources::{
-            events::SimulatorEvent,
-            simulator_vars::{
-                CursorPosition, Damping, DeltaTime, FreezeThreshold, GravityForce,
-                PointIntersection, QuadTreeTheta, RepelForce, SpringNeutralLength, SpringStiffness,
-                WorldSize,
-            },
-        },
-        systems::position_compute::norm_pos,
+use crate::web::simulator::{
+    components::nodes::{Dragged, Fixed, Position, Velocity},
+    ressources::simulator_vars::{
+        CursorPosition, Damping, DeltaTime, FreezeThreshold, PointIntersection, WorldSize,
     },
 };
-use glam::Vec2;
 use log::info;
 use rayon::prelude::*;
 use specs::prelude::*;
 use specs::shred;
-use specs::shrev::EventChannel;
-use specs::{
-    Builder, Dispatcher, DispatcherBuilder, Entities, Join, LazyUpdate, ParJoin, Read, ReadExpect,
-    ReadStorage, ReaderId, System, World, WorldExt, Write, WriteStorage,
-};
-use std::collections::HashMap;
-use winit::dpi::PhysicalSize;
+use specs::{Entities, Join, LazyUpdate, ParJoin, Read, ReadStorage, WriteStorage};
 
 pub struct UpdateNodePosition;
 

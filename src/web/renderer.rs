@@ -9,29 +9,21 @@ use crate::web::{
 };
 use glam::Vec2;
 use glyphon::{
-    Attrs, Buffer as GlyphBuffer, BufferLine, Cache, Color, Family, FontSystem, Metrics,
-    Resolution, Shaping, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
+    Attrs, Buffer as GlyphBuffer, Cache, Color, Family, FontSystem, Metrics, Resolution, Shaping,
+    SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
 use log::info;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use specs::shrev::EventChannel;
 use specs::{Join, WorldExt};
 use std::{cmp::min, collections::HashMap, sync::Arc};
 use vertex_buffer::{NodeInstance, VERTICES, Vertex, ViewUniforms};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
-use wgpu::{Face, util::DeviceExt};
-use winit::dpi::PhysicalPosition;
+use wgpu::util::DeviceExt;
 use winit::event::MouseButton;
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::EventLoopExtWebSys;
-use winit::{
-    application::ApplicationHandler,
-    event::*,
-    event_loop::{ActiveEventLoop, EventLoop},
-    keyboard::{KeyCode, PhysicalKey},
-    window::Window,
-};
+use winit::{dpi::PhysicalPosition, event::MouseScrollDelta};
+use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
 pub struct State {
     // #[cfg(target_arch = "wasm32")]
