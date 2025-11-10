@@ -1,13 +1,14 @@
 pub mod components;
 pub mod ressources;
 mod systems;
+use crate::web::prelude::EVENT_DISPATCHER;
 use crate::web::{
     quadtree::{BoundingBox2D, QuadTree},
     simulator::{
         components::{
             edges::Connects,
             forces::NodeForces,
-            nodes::{Dragged, Fixed, Mass, Position, Velocity},
+            nodes::{Fixed, Mass, Position, Velocity},
         },
         ressources::{
             events::SimulatorEvent,
@@ -30,16 +31,12 @@ use crate::web::{
     },
 };
 use glam::Vec2;
-use log::info;
 use rayon::prelude::*;
-use specs::prelude::*;
-use specs::shrev::EventChannel;
 use specs::{
-    Builder, Dispatcher, DispatcherBuilder, Entities, Join, LazyUpdate, ParJoin, Read, ReadExpect,
-    ReadStorage, ReaderId, System, World, WorldExt, Write, WriteStorage,
+    Builder, Dispatcher, DispatcherBuilder, Entities, Join, LazyUpdate, ParJoin, Read, ReadStorage,
+    ReaderId, System, World, WorldExt, Write,
 };
-use std::{collections::HashMap, iter::Enumerate};
-use winit::dpi::PhysicalSize;
+use std::collections::HashMap;
 
 struct QuadTreeConstructor;
 
@@ -84,11 +81,11 @@ type EventSystemData<'a> = (
     Write<'a, FreezeThreshold>,
 );
 
-//#[warn(dead_code = false)]
+type FixedSystemData<'a> = (Entities<'a>, ReadStorage<'a, Fixed>, Read<'a, LazyUpdate>);
+
 pub struct Simulator<'a, 'b> {
     pub world: World,
     dispatcher: Dispatcher<'a, 'b>,
-    event_channel: EventChannel<SimulatorEvent>,
     /// Event channel reader ID
     reader_id: ReaderId<SimulatorEvent>,
 }
@@ -100,15 +97,11 @@ impl<'a, 'b> Simulator<'a, 'b> {
 
     pub fn tick(&mut self) {
         self.dispatcher.dispatch(&self.world);
-        Self::handle_simulator_event(&self.world, &self.event_channel, &mut self.reader_id);
+        Self::handle_simulator_event(&self.world, &mut self.reader_id);
         self.world.maintain();
     }
 
-    fn handle_simulator_event(
-        world: &World,
-        event_channel: &EventChannel<SimulatorEvent>,
-        reader_id: &mut ReaderId<SimulatorEvent>,
-    ) {
+    fn handle_simulator_event(world: &World, reader_id: &mut ReaderId<SimulatorEvent>) {
         let event_data: EventSystemData = world.system_data();
         let (
             mut repel_force,
@@ -121,7 +114,9 @@ impl<'a, 'b> Simulator<'a, 'b> {
             mut freeze_threshold,
         ) = event_data;
 
-        for event in event_channel.read(reader_id) {
+        let mut event_received = false;
+        for event in EVENT_DISPATCHER.sim_chan.read().unwrap().read(reader_id) {
+            event_received = true;
             match event {
                 SimulatorEvent::RepelForceUpdated(value) => repel_force.0 = *value,
                 SimulatorEvent::SpringStiffnessUpdated(value) => spring_stiffness.0 = *value,
@@ -129,7 +124,7 @@ impl<'a, 'b> Simulator<'a, 'b> {
                 SimulatorEvent::GravityForceUpdated(value) => gravity_force.0 = *value,
                 SimulatorEvent::DeltaTimeUpdated(value) => deltatime.0 = *value,
                 SimulatorEvent::DampingUpdated(value) => damping.0 = *value,
-                SimulatorEvent::SimulationAccuracyUpdated(value) => quadtree_theta.0 = *value,
+                SimulatorEvent::QuadTreeThetaUpdated(value) => quadtree_theta.0 = *value,
                 SimulatorEvent::FreezeThresholdUpdated(value) => freeze_threshold.0 = *value,
                 SimulatorEvent::WindowResized { width, height } => {
                     let mut world_size = world.fetch_mut::<WorldSize>();
@@ -158,7 +153,7 @@ impl<'a, 'b> Simulator<'a, 'b> {
                     {
                         let mut cursor_position = world.fetch_mut::<CursorPosition>();
                         cursor_position.0 = *cursor_pos;
-                        info!("(EM) CP: {0}", cursor_pos)
+                        // info!("(EM) CP: {0}", cursor_pos)
                     }
                     {
                         let dragging_data: DraggingSystemData = world.system_data();
@@ -167,10 +162,15 @@ impl<'a, 'b> Simulator<'a, 'b> {
                 }
             }
         }
-    }
+        // Enable simulation when simulation params are updated
+        if event_received {
+            let fixed_data: FixedSystemData = world.system_data();
+            let (entities, fixed, updater) = fixed_data;
 
-    pub fn send_event(&mut self, event: SimulatorEvent) {
-        self.event_channel.single_write(event);
+            (&entities, &fixed).par_join().for_each(|(entity, _)| {
+                updater.remove::<Fixed>(entity);
+            });
+        }
     }
 }
 
@@ -321,12 +321,10 @@ impl SimulatorBuilder {
         Self::create_entities(&mut world, nodes, edges, sizes);
         self.add_ressources(&mut world);
 
-        let mut event_channel = EventChannel::<SimulatorEvent>::new();
-        let reader_id = event_channel.register_reader();
+        let reader_id = EVENT_DISPATCHER.sim_chan.write().unwrap().register_reader();
         Simulator {
             world,
             dispatcher,
-            event_channel,
             reader_id,
         }
     }
@@ -385,7 +383,7 @@ impl SimulatorBuilder {
 }
 
 impl Default for SimulatorBuilder {
-    /// Get a Instance of `SimulatorBuilder` with default values
+    /// Get an instance of `SimulatorBuilder` with default values
     fn default() -> Self {
         Self {
             repel_force: 10e7, // Do not make this value greater or equal 10e8
@@ -394,8 +392,8 @@ impl Default for SimulatorBuilder {
             gravity_force: 7.5,
             delta_time: 0.02,
             damping: 0.8,
-            quadtree_theta: 0.0,
-            freeze_thresh: 0.0,
+            quadtree_theta: 0.8,
+            freeze_thresh: 10.0,
         }
     }
 }

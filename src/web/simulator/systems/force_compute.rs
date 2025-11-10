@@ -1,31 +1,20 @@
 use crate::web::{
-    quadtree::{BoundingBox2D, QuadTree},
+    quadtree::QuadTree,
     simulator::{
         components::{
             edges::Connects,
             forces::NodeForces,
             nodes::{Dragged, Fixed, Mass, Position, Velocity},
         },
-        ressources::{
-            events::SimulatorEvent,
-            simulator_vars::{
-                Damping, DeltaTime, FreezeThreshold, GravityForce, QuadTreeTheta, RepelForce,
-                SpringNeutralLength, SpringStiffness, WorldSize,
-            },
+        ressources::simulator_vars::{
+            DeltaTime, GravityForce, QuadTreeTheta, RepelForce, SpringNeutralLength,
+            SpringStiffness, WorldSize,
         },
     },
 };
 use glam::Vec2;
-use log::info;
 use rayon::prelude::*;
-use specs::prelude::*;
-use specs::shrev::EventChannel;
-use specs::{
-    Builder, Dispatcher, DispatcherBuilder, Entities, Join, LazyUpdate, ParJoin, Read, ReadExpect,
-    ReadStorage, ReaderId, System, World, WorldExt, Write, WriteStorage,
-};
-use std::collections::HashMap;
-use winit::dpi::PhysicalSize;
+use specs::{Entities, Join, ParJoin, Read, ReadExpect, ReadStorage, System, WriteStorage};
 
 pub struct ComputeNodeForce;
 

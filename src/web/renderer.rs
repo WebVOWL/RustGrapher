@@ -3,38 +3,30 @@ mod node_types;
 mod vertex_buffer;
 
 use crate::web::{
-    renderer::node_shape::NodeShape,
-    renderer::node_types::NodeType,
+    prelude::EVENT_DISPATCHER,
+    renderer::{node_shape::NodeShape, node_types::NodeType},
     simulator::{Simulator, components::nodes::Position, ressources::events::SimulatorEvent},
 };
 use glam::Vec2;
 use glyphon::{
-    Attrs, Buffer as GlyphBuffer, BufferLine, Cache, Color, Family, FontSystem, Metrics,
-    Resolution, Shaping, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
+    Attrs, Buffer as GlyphBuffer, Cache, Color, Family, FontSystem, Metrics, Resolution, Shaping,
+    SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
 use log::info;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use specs::shrev::EventChannel;
 use specs::{Join, WorldExt};
 use std::{cmp::min, collections::HashMap, sync::Arc};
 use vertex_buffer::{NodeInstance, VERTICES, Vertex, ViewUniforms};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
-use wgpu::{Face, util::DeviceExt};
-use winit::dpi::PhysicalPosition;
+use wgpu::util::DeviceExt;
 use winit::event::MouseButton;
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::EventLoopExtWebSys;
-use winit::{
-    application::ApplicationHandler,
-    event::*,
-    event_loop::{ActiveEventLoop, EventLoop},
-    keyboard::{KeyCode, PhysicalKey},
-    window::Window,
-};
+use winit::{dpi::PhysicalPosition, event::MouseScrollDelta};
+use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
 pub struct State {
-    #[cfg(target_arch = "wasm32")]
+    // #[cfg(target_arch = "wasm32")]
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -413,7 +405,7 @@ impl State {
                 },
                 None => {}
             }
-            let mut current_text = label_text.clone();
+            let current_text = label_text.clone();
 
             temp_buffer.set_wrap(&mut font_system, glyphon::Wrap::Word);
             temp_buffer.set_size(&mut font_system, Some(capped_width), None);
@@ -667,7 +659,7 @@ impl State {
         }
 
         let mut sim_nodes = Vec::with_capacity(positions.len());
-        for (i, pos) in positions.iter().enumerate() {
+        for pos in positions.iter() {
             sim_nodes.push(Vec2::new(pos[0], pos[1]));
         }
 
@@ -685,7 +677,7 @@ impl State {
             }
         }
 
-        let mut simulator = Simulator::builder().build(sim_nodes, sim_edges, sim_sizes);
+        let simulator = Simulator::builder().build(sim_nodes, sim_edges, sim_sizes);
 
         // Glyphon: do not create heavy glyphon resources unless we have a non-zero surface.
         // Initialize them lazily below (or on first resize).
@@ -976,10 +968,12 @@ impl State {
                 self.init_glyphon();
             }
 
-            self.simulator.send_event(SimulatorEvent::WindowResized {
-                width: width,
-                height: height,
-            });
+            EVENT_DISPATCHER.sim_chan.write().unwrap().single_write(
+                SimulatorEvent::WindowResized {
+                    width: width,
+                    height: height,
+                },
+            );
         }
     }
 
@@ -1140,7 +1134,7 @@ impl State {
                 let card_y_px = card_screen_phys.y;
 
                 // compute bounds from buffer size and center the label
-                let (label_w_opt, label_h_opt) = buf.size();
+                let (label_w_opt, _label_h_opt) = buf.size();
                 let label_w = label_w_opt.unwrap_or(48.0) as f32;
                 let label_h = label_w_opt.unwrap_or(24.0) as f32;
 
@@ -1367,8 +1361,11 @@ impl State {
                         self.node_dragged = true;
                         // Convert screen coordinates to world coordinates
                         let pos_world = self.screen_to_world(pos);
-                        self.simulator
-                            .send_event(SimulatorEvent::DragStart(pos_world));
+                        EVENT_DISPATCHER
+                            .sim_chan
+                            .write()
+                            .unwrap()
+                            .single_write(SimulatorEvent::DragStart(pos_world));
                     }
                 }
             }
@@ -1376,7 +1373,11 @@ impl State {
                 // Stop node dragging on mouse release
                 if self.node_dragged {
                     self.node_dragged = false;
-                    self.simulator.send_event(SimulatorEvent::DragEnd);
+                    EVENT_DISPATCHER
+                        .sim_chan
+                        .write()
+                        .unwrap()
+                        .single_write(SimulatorEvent::DragEnd);
                 }
             }
             (MouseButton::Right, true) => {
@@ -1404,8 +1405,11 @@ impl State {
         if self.node_dragged {
             // Convert screen coordinates to world coordinates before sending to simulator
             let pos_world = self.screen_to_world(pos_screen);
-            self.simulator
-                .send_event(SimulatorEvent::Dragged(pos_world));
+            EVENT_DISPATCHER
+                .sim_chan
+                .write()
+                .unwrap()
+                .single_write(SimulatorEvent::Dragged(pos_world));
         } else if self.pan_active {
             if let Some(last_pos_screen) = self.last_pan_position {
                 // 1. Get the world position of the cursor now.
