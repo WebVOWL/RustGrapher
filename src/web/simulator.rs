@@ -389,10 +389,10 @@ impl Default for SimulatorBuilder {
     fn default() -> Self {
         Self {
             repel_force: 10e7, // Do not make this value greater or equal 10e8
-            spring_stiffness: 300.0,
-            spring_neutral_length: 70.0,
-            gravity_force: 30.0,
-            delta_time: 0.01,
+            spring_stiffness: 200.0,
+            spring_neutral_length: 80.0,
+            gravity_force: 7.5,
+            delta_time: 0.02,
             damping: 0.8,
             quadtree_theta: 0.0,
             freeze_thresh: 0.0,
