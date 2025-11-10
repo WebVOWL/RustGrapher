@@ -1,7 +1,7 @@
 struct VertIn {
     @location(0) position: vec2<f32>,        // Position in pixel space
     @location(1) t_param: f32,               // Parameter along curve [0..1]
-    @location(2) side: f32,                  // -1 or +1 for left/right
+    @location(2) side: i32,                  // -1 or +1 for left/right
     @location(3) line_type: u32,             // Line style
     @location(4) end_shape_type: u32,        // 0: Circle, 1: Rectangle
     @location(5) end_shape_dim: vec2<f32>,   // Shape dimensions
@@ -14,7 +14,7 @@ struct VertIn {
 struct VertOut {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) v_t: f32,
-    @location(1) v_side: f32,
+    @location(1) v_side: i32,
     @interpolate(flat) @location(2) v_line_type: u32,
     @interpolate(flat) @location(3) v_end_shape_type: u32,
     @location(4) v_end_shape_dim: vec2<f32>,
@@ -37,9 +37,9 @@ var<uniform> u_view: ViewUniforms;
 // Arrow constants (pixels)
 const ARROW_LENGTH_PX: f32 = 10.0;
 const ARROW_WIDTH_PX: f32 = 15.0;
-const AA_SOFTNESS: f32 = 2.5;
+const AA_SOFTNESS: f32 = 1.5;
 const DASH_LENGTH_PX: f32 = 20.0;
-const LINE_THICKNESS = 1.5;
+const LINE_THICKNESS = 2.25;
 
 fn bezier_point(p0: vec2<f32>, ctrl: vec2<f32>, p2: vec2<f32>, t: f32) -> vec2<f32> {
     let t1 = 1.0 - t;
@@ -107,17 +107,19 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     let dist_to_center = length(px - center_pos);
 
     // Convert pixel-space constants to world-space
-    let line_thickness_world = LINE_THICKNESS * 1.90;
+    let line_thickness_world = LINE_THICKNESS;
     let aa_softness_world = AA_SOFTNESS / u_view.zoom;
-
-    // AA smoothing across the curve thickness
-    let half_thickness_world = line_thickness_world / 2.0;
-    var line_alpha = 1.0 - smoothstep(half_thickness_world - aa_softness_world, 
-                                    half_thickness_world + aa_softness_world, 
-                                    dist_to_center);
 
     // Calculate physical distance from this fragment to the end point
     let dist_to_end = length(px - tip);
+
+    // AA smoothing across the curve thickness
+    let half_thickness_world = line_thickness_world / 2.0;
+    let line_aa_fade_end = half_thickness_world - aa_softness_world;
+    let line_aa_fade_start = half_thickness_world + aa_softness_world;
+    var line_alpha = 1.0 - smoothstep(line_aa_fade_end, 
+                                    line_aa_fade_start, 
+                                    dist_to_center);
 
     // Apply dash/dot pattern
     if (in.v_line_type == 1u || in.v_line_type == 2u || in.v_line_type == 4u) {
@@ -144,8 +146,32 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
 
     // No arrow for disjoint edges (type 2)
     if (in.v_line_type == 2u) {
-        return vec4<f32>(vec3<f32>(0.0), line_alpha);
+        return vec4<f32>(color, line_alpha);
     }
+    
+    if (in.v_side != 0) {
+        // Fade out line-strip fragment
+        let arrow_length_world = ARROW_LENGTH_PX;
+        let diamond_length_world = ARROW_LENGTH_PX * 2.0;
+
+        var arrow_start_dist: f32 = 0.0;
+        if (in.v_line_type == 4u) { // Diamond
+            arrow_start_dist = diamond_length_world;
+        } else { // Triangle (type 0, 1, 3)
+            arrow_start_dist = arrow_length_world;
+        }
+        
+        // Fade out line alpha as it approaches the arrow
+        let fade_start = arrow_start_dist + aa_softness_world;
+        let fade_end = arrow_start_dist - aa_softness_world;
+        line_alpha *= smoothstep(fade_end, fade_start, dist_to_end);
+
+        return vec4<f32>(color, line_alpha);
+    }
+    
+    line_alpha = 0.0;
+    
+    let edge_thickness_world = 2.0;
 
     if (in.v_line_type == 4u) {
         // Diamond arrow for set operators
@@ -158,44 +184,41 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
         let perp_d = vec2<f32>(-dir.y, dir.x);
         let diamond_left = diamond_center + perp_d * diamond_width_px * 0.5;
         let diamond_right = diamond_center - perp_d * diamond_width_px * 0.5;
-
-        // Front triangle
+        
+        // 1. Find distance to nearest of the 4 edges
+        let dist1 = point_to_segment_dist(px, diamond_tip, diamond_left);
+        let dist2 = point_to_segment_dist(px, diamond_tip, diamond_right);
+        let dist3 = point_to_segment_dist(px, diamond_left, diamond_back);
+        let dist4 = point_to_segment_dist(px, diamond_right, diamond_back);
+        let min_edge_dist = min(min(dist1, dist2), min(dist3, dist4));
+        
+        // 2. Check if inside either of the 2 triangles
         let area1_total = tri_area_fast(diamond_tip, diamond_left, diamond_right);
         let area1_sub = tri_area_fast(diamond_left, diamond_right, px) + 
                         tri_area_fast(diamond_tip, px, diamond_right) + 
                         tri_area_fast(diamond_tip, diamond_left, px);
-        let area1_diff = abs(area1_sub - area1_total);
-
-        // Back triangle
+        let is_inside1 = (area1_sub - area1_total) / max(1.0, area1_total) <= 0.01;
+        
         let area2_total = tri_area_fast(diamond_back, diamond_left, diamond_right);
         let area2_sub = tri_area_fast(diamond_left, diamond_right, px) + 
                         tri_area_fast(diamond_back, px, diamond_right) + 
                         tri_area_fast(diamond_back, diamond_left, px);
-        let area2_diff = abs(area2_sub - area2_total);
+        let is_inside2 = (area2_sub - area2_total) / max(1.0, area2_total) <= 0.01;
+        
+        let is_outside = !(is_inside1 || is_inside2);
 
-        var diamond_alpha: f32 = 0.0;
-        if (area1_total > 1e-5) {
-            let norm_diff1 = area1_diff / area1_total;
-            diamond_alpha = max(diamond_alpha, 1.0 - smoothstep(0.0, aa_softness_world, norm_diff1));
-        }
-        if (area2_total > 1e-5) {
-            let norm_diff2 = area2_diff / area2_total;
-            diamond_alpha = max(diamond_alpha, 1.0 - smoothstep(0.0, aa_softness_world, norm_diff2));
-        }
+        // 3. Calculate signed distance (negative inside, positive outside)
+        let signed_dist = select(-min_edge_dist, min_edge_dist, is_outside);
 
-        if (diamond_alpha > 0.0) {
-            let dist1 = point_to_segment_dist(px, diamond_tip, diamond_left);
-            let dist2 = point_to_segment_dist(px, diamond_tip, diamond_right);
-            let dist3 = point_to_segment_dist(px, diamond_left, diamond_back);
-            let dist4 = point_to_segment_dist(px, diamond_right, diamond_back);
-            let min_edge_dist = min(min(dist1, dist2), min(dist3, dist4));
+        // 4. Calculate alpha
+        arrow_alpha = 1.0 - smoothstep(0.0, aa_softness_world, signed_dist);
+        inside_arrow = arrow_alpha > 0.0;
 
-            let edge_thickness = 2.0;
-            let border_smooth = smoothstep(0.0, edge_thickness, min_edge_dist);
-            arrow_color = mix(vec3<f32>(0.0), vec3<f32>(1.0), border_smooth);
-            arrow_alpha = diamond_alpha;
-            inside_arrow = true;
-        }
+        // 5. Calculate border color based on inside distance
+        let border_dist = max(0.0, -signed_dist);
+        let border_smooth = smoothstep(0.0, edge_thickness_world, border_dist);
+        arrow_color = mix(vec3<f32>(0.0), vec3<f32>(1.0), border_smooth);
+
     } else {
         // Default triangle arrow
         let base_center = tip - dir * ARROW_LENGTH_PX;
@@ -204,28 +227,31 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
         let left = base_center + perp * halfw;
         let right = base_center - perp * halfw;
 
-        // Use area-based triangle test
+        // 1. Find distance to nearest of the 3 edges
+        let dist_to_left_edge = point_to_segment_dist(px, tip, left);
+        let dist_to_right_edge = point_to_segment_dist(px, tip, right);
+        let dist_to_base_edge = point_to_segment_dist(px, left, right);
+        let min_edge_dist = min(min(dist_to_left_edge, dist_to_right_edge), dist_to_base_edge);
+
+        // 2. Check if inside the triangle
         let area_total = tri_area_fast(tip, left, right);
         let area_sub = tri_area_fast(px, left, right) + 
                        tri_area_fast(tip, px, right) + 
                        tri_area_fast(tip, left, px);
-        let area_diff = abs(area_sub - area_total);
+        let is_outside = (area_sub - area_total) / max(1.0, area_total) > 0.01;
 
-        if (area_total > 1e-5) {
-            let normalized_diff = area_diff / area_total;
-            arrow_alpha = 1.0 - smoothstep(0.0, aa_softness_world, normalized_diff);
-        }
+        // 3. Calculate a signed distance
+        let signed_dist = select(-min_edge_dist, min_edge_dist, is_outside);
+
+        // 4. Calculate alpha
+        arrow_alpha = 1.0 - smoothstep(0.0, aa_softness_world, signed_dist);
         inside_arrow = arrow_alpha > 0.0;
 
         // White arrow with black border for type 1 (SubclassOf)
-        if (in.v_line_type == 1u && inside_arrow) {
-            let w0 = tri_area_fast(px, left, right) / area_total;
-            let w1 = tri_area_fast(px, right, tip) / area_total;
-            let w2 = tri_area_fast(px, tip, left) / area_total;
-
-            let edge_dist = min(min(w0, w1), w2);
-            let edge_thickness = 2.0;
-            let border_smooth = smoothstep(0.0, edge_thickness / ARROW_WIDTH_PX, edge_dist);
+        if (in.v_line_type == 1u) {
+            // 5. Calculate border color based on inside distance
+            let border_dist = max(0.0, -signed_dist);
+            let border_smooth = smoothstep(0.0, edge_thickness_world, border_dist);
             arrow_color = mix(vec3<f32>(0.0), vec3<f32>(1.0), border_smooth);
         }
     }

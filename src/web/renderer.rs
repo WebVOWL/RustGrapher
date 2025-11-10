@@ -1029,10 +1029,10 @@ impl State {
                 let scaled_label_h = label_h * self.zoom;
 
                 // skip text rendering for nodes outside the viewport
-                if node_x_px < -(scaled_label_w * 0.5)
-                    || node_x_px > vp_w_px + (scaled_label_w * 0.5)
-                    || node_y_px < -(scaled_label_h * 0.5)
-                    || node_y_px > vp_h_px + (scaled_label_h * 0.5)
+                if node_x_px < -scaled_label_w * 0.4
+                    || node_x_px > vp_w_px + scaled_label_w * 0.4
+                    || node_y_px < -scaled_label_h * 0.4
+                    || node_y_px > vp_h_px + scaled_label_h * 0.4
                 {
                     continue;
                 }
@@ -1148,10 +1148,10 @@ impl State {
                 let scaled_label_h = label_h * self.zoom;
 
                 // skip text rendering for cardinalities outside the viewport
-                if card_x_px < -scaled_label_w * 0.5
-                    || card_x_px > vp_w_px + scaled_label_w * 0.5
-                    || card_y_px < -scaled_label_h * 0.5
-                    || card_y_px > vp_h_px + scaled_label_h * 0.5
+                if card_x_px < -scaled_label_w * 0.4
+                    || card_x_px > vp_w_px + scaled_label_w * 0.4
+                    || card_y_px < -scaled_label_h * 0.4
+                    || card_y_px > vp_h_px + scaled_label_h * 0.4
                 {
                     continue;
                 }
