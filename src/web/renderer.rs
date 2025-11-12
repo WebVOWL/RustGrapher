@@ -856,7 +856,6 @@ impl State {
             // sample label using the NodeType
             let attrs = &Attrs::new().family(Family::SansSerif);
             let node_type_metrics = Metrics::new(font_px - 3.0, line_px);
-            // Build owned spans first to avoid holding immutable borrows while mutating.
             let mut owned_spans: Vec<(String, Attrs)> = Vec::new();
             match self.node_types[i] {
                 NodeType::EquivalentClass => {
@@ -865,10 +864,8 @@ impl State {
                     let label1 = parts.get(0).map_or("", |v| *v).to_string();
                     let eq_labels = parts.split_off(1);
                     if !eq_labels.is_empty() {
-                        // first the main label and a newline
                         owned_spans.push((label1, attrs.clone()));
                         owned_spans.push(("\n".to_string(), attrs.clone()));
-                        // append eq labels, adding ", " for all but the last
                         for (idx, eq) in eq_labels.iter().enumerate() {
                             let mut s = eq.to_string();
                             if idx + 1 < eq_labels.len() {
