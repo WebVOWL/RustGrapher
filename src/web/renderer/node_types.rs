@@ -13,6 +13,8 @@ pub enum NodeType {
     Literal,
     RdfsClass,
     RdfsResource,
+
+    // Properties
     Datatype,
     ObjectProperty,
     DatatypeProperty,
