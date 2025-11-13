@@ -14,7 +14,7 @@ struct VertIn {
 struct VertOut {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) v_t: f32,
-    @location(1) v_side: i32,
+    @interpolate(flat) @location(1) v_side: i32,
     @interpolate(flat) @location(2) v_line_type: u32,
     @interpolate(flat) @location(3) v_end_shape_type: u32,
     @location(4) v_end_shape_dim: vec2<f32>,

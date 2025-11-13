@@ -58,6 +58,7 @@ pub struct State {
     node_types: Vec<NodeType>,
     node_shapes: Vec<NodeShape>,
     cardinalities: Vec<(u32, (String, Option<String>))>,
+    characteristics: HashMap<usize, String>,
     frame_count: u64, // TODO: Remove after implementing simulator
     simulator: Simulator<'static, 'static>,
     paused: bool,
@@ -327,6 +328,7 @@ impl State {
             [6, 21, 7],
             [4, 22, 4],
             [2, 23, 5],
+            [5, 23, 2],
         ];
 
         let cardinalities: Vec<(u32, (String, Option<String>))> = vec![
@@ -335,6 +337,10 @@ impl State {
             (1, ("1".to_string(), Some("10".to_string()))),
             (10, ("5".to_string(), Some("10".to_string()))),
         ];
+
+        let mut characteristics = HashMap::new();
+        characteristics.insert(21, "transitive".to_string());
+        characteristics.insert(23, "functional\ninverse functional".to_string());
 
         // FontSystem instance for text measurement
         let mut font_system =
@@ -653,7 +659,9 @@ impl State {
                 .get(&(usize::min(start, end), usize::max(start, end)))
                 .unwrap()
                 .len();
-            if num_neighbors < 2 {
+            if num_neighbors < 2
+                || (matches!(node_types[center], NodeType::InverseProperty) && num_neighbors <= 2)
+            {
                 solitary_edges.push([start, center, end]);
             }
         }
@@ -722,6 +730,7 @@ impl State {
             node_types: node_types.to_vec(),
             node_shapes,
             cardinalities,
+            characteristics,
             frame_count: 0,
             simulator,
             paused: false,
@@ -808,14 +817,17 @@ impl State {
             let (label_width, label_height) = match self.node_shapes[i] {
                 NodeShape::Rectangle { w, .. } => {
                     // Calculate physical pixel width from shape's width multiplier
-                    let height = match self.node_types[i] {
+                    let mut height = match self.node_types[i] {
                         NodeType::InverseProperty => 48.0,
                         _ => 12.0,
+                    };
+                    if self.characteristics.contains_key(&i) {
+                        height += 24.0;
                     };
                     (w * 85.0 * scale, height * scale)
                 }
                 NodeShape::Circle { r } => {
-                    let height = match self.node_types[i] {
+                    let mut height = match self.node_types[i] {
                         NodeType::ExternalClass
                         | NodeType::DeprecatedClass
                         | NodeType::EquivalentClass
@@ -825,6 +837,9 @@ impl State {
                         | NodeType::Complement
                         | NodeType::Intersection => 36.0,
                         _ => 24.0,
+                    };
+                    if self.characteristics.contains_key(&i) {
+                        height += 24.0;
                     };
                     let width = match self.node_types[i] {
                         NodeType::Union
@@ -841,71 +856,115 @@ impl State {
             // sample label using the NodeType
             let attrs = &Attrs::new().family(Family::SansSerif);
             let node_type_metrics = Metrics::new(font_px - 3.0, line_px);
-            let mut all_owned_labels: Vec<String> = Vec::new();
-            let spans = match self.node_types[i] {
+            let mut owned_spans: Vec<(String, Attrs)> = Vec::new();
+            match self.node_types[i] {
                 NodeType::EquivalentClass => {
                     // TODO: Update when handling equivalent classes from ontology
-                    let mut labels: Vec<&str> = label.split('\n').collect();
-                    let label1 = labels.get(0).map_or("", |v| *v);
-                    let eq_labels = labels.split_off(1);
-                    let (last_label, eq_labels) = eq_labels.split_last().unwrap();
-
-                    let mut eq_labels_attributes: Vec<(&str, _)> = Vec::new();
-                    for eq_label in eq_labels {
-                        let mut extended_label = eq_label.to_string();
-                        extended_label.push_str(", ");
-                        all_owned_labels.push(extended_label);
+                    let mut parts: Vec<&str> = label.split('\n').collect();
+                    let label1 = parts.get(0).map_or("", |v| *v).to_string();
+                    let eq_labels = parts.split_off(1);
+                    if !eq_labels.is_empty() {
+                        owned_spans.push((label1, attrs.clone()));
+                        owned_spans.push(("\n".to_string(), attrs.clone()));
+                        for (idx, eq) in eq_labels.iter().enumerate() {
+                            let mut s = eq.to_string();
+                            if idx + 1 < eq_labels.len() {
+                                s.push_str(", ");
+                            }
+                            owned_spans.push((s, attrs.clone()));
+                        }
+                    } else {
+                        owned_spans.push((label1, attrs.clone()));
                     }
-                    all_owned_labels.push(last_label.to_string());
-
-                    for extended_label in &all_owned_labels {
-                        eq_labels_attributes.push((extended_label.as_str(), attrs.clone()));
-                    }
-
-                    let mut combined_labels = vec![(label1, attrs.clone()), ("\n", attrs.clone())];
-                    combined_labels.append(&mut eq_labels_attributes);
-
-                    combined_labels
                 }
                 NodeType::InverseProperty => {
-                    let labels: Vec<&str> = label.split('\n').collect();
-                    let mut label1 = labels.get(0).map_or("", |v| *v).to_string();
-                    label1.push_str("\n\n\n");
-                    let label2 = labels.get(1).map_or("", |v| *v);
-                    all_owned_labels.push(label1);
-                    all_owned_labels.push(label2.to_string());
-                    let mut labels_attributes: Vec<(&str, _)> = Vec::new();
-                    for extended_label in &all_owned_labels {
-                        labels_attributes.push((extended_label.as_str(), attrs.clone()));
+                    if let Some(chs) = self.characteristics.get(&i) {
+                        let (ch1, ch2) = chs.split_once("\n").unwrap_or((chs, ""));
+                        let labels_vec: Vec<&str> = label.split('\n').collect();
+                        let label1 = labels_vec.get(0).map_or("", |v| *v).to_string();
+                        owned_spans.push((label1, attrs.clone()));
+                        owned_spans.push((
+                            format!("\n({})\n\n", ch1),
+                            attrs.clone().metrics(node_type_metrics),
+                        ));
+                        let label2 = labels_vec.get(1).map_or("", |v| *v).to_string();
+                        owned_spans.push((label2, attrs.clone()));
+                        owned_spans.push((
+                            format!("\n({})", ch2),
+                            attrs.clone().metrics(node_type_metrics),
+                        ));
+                    } else {
+                        let labels_vec: Vec<&str> = label.split('\n').collect();
+                        let mut label1 = labels_vec.get(0).map_or("", |v| *v).to_string();
+                        label1.push_str("\n\n\n");
+                        let label2 = labels_vec.get(1).map_or("", |v| *v).to_string();
+                        owned_spans.push((label1, attrs.clone()));
+                        owned_spans.push((label2, attrs.clone()));
                     }
-                    labels_attributes
                 }
-                NodeType::ExternalClass => vec![
-                    (label.as_str(), attrs.clone()),
-                    ("\n(external)", attrs.clone().metrics(node_type_metrics)),
-                ],
-                NodeType::DeprecatedClass => vec![
-                    (label.as_str(), attrs.clone()),
-                    ("\n(deprecated)", attrs.clone().metrics(node_type_metrics)),
-                ],
-                NodeType::DisjointWith => vec![
-                    (label.as_str(), attrs.clone()),
-                    ("\n\n(disjoint)", attrs.clone().metrics(node_type_metrics)),
-                ],
-                NodeType::Thing => vec![("Thing", attrs.clone())],
+                NodeType::ExternalClass => {
+                    owned_spans.push((label.to_string(), attrs.clone()));
+                    owned_spans.push((
+                        "\n(external)".to_string(),
+                        attrs.clone().metrics(node_type_metrics),
+                    ));
+                }
+                NodeType::DeprecatedClass => {
+                    owned_spans.push((label.to_string(), attrs.clone()));
+                    owned_spans.push((
+                        "\n(deprecated)".to_string(),
+                        attrs.clone().metrics(node_type_metrics),
+                    ));
+                }
+                NodeType::DisjointWith => {
+                    owned_spans.push((label.to_string(), attrs.clone()));
+                    owned_spans.push((
+                        "\n\n(disjoint)".to_string(),
+                        attrs.clone().metrics(node_type_metrics),
+                    ));
+                }
+                NodeType::Thing => {
+                    owned_spans.push(("Thing".to_string(), attrs.clone()));
+                }
                 NodeType::Complement => {
-                    vec![(label.as_str(), attrs.clone()), ("\n\n¬", attrs.clone())]
+                    owned_spans.push((label.to_string(), attrs.clone()));
+                    owned_spans.push(("\n\n¬".to_string(), attrs.clone()));
                 }
                 NodeType::DisjointUnion => {
-                    vec![(label.as_str(), attrs.clone()), ("\n\n1", attrs.clone())]
+                    owned_spans.push((label.to_string(), attrs.clone()));
+                    owned_spans.push(("\n\n1".to_string(), attrs.clone()));
                 }
                 NodeType::Intersection => {
-                    vec![(label.as_str(), attrs.clone()), ("\n\n∩", attrs.clone())]
+                    owned_spans.push((label.to_string(), attrs.clone()));
+                    owned_spans.push(("\n\n∩".to_string(), attrs.clone()));
                 }
-                NodeType::Union => vec![(label.as_str(), attrs.clone()), ("\n\n∪", attrs.clone())],
-                NodeType::SubclassOf => vec![("Subclass of", attrs.clone())],
-                _ => vec![(label.as_str(), attrs.clone())],
-            };
+                NodeType::Union => {
+                    owned_spans.push((label.to_string(), attrs.clone()));
+                    owned_spans.push(("\n\n∪".to_string(), attrs.clone()));
+                }
+                NodeType::SubclassOf => {
+                    owned_spans.push(("Subclass of".to_string(), attrs.clone()));
+                }
+                _ => {
+                    owned_spans.push((label.to_string(), attrs.clone()));
+                }
+            }
+
+            // Append characteristic as a small parenthesized suffix if present.
+            if !matches!(self.node_types[i], NodeType::InverseProperty) {
+                if let Some(ch) = self.characteristics.get(&i) {
+                    owned_spans.push((
+                        format!("\n({})", ch),
+                        attrs.clone().metrics(node_type_metrics),
+                    ));
+                }
+            }
+
+            let spans: Vec<(&str, Attrs)> = owned_spans
+                .iter()
+                .map(|(s, a)| (s.as_str(), a.clone()))
+                .collect();
+
             buf.set_rich_text(
                 &mut font_system,
                 spans,
@@ -1012,8 +1071,13 @@ impl State {
 
                 // convert node coords to physical pixels
                 let screen_pos_logical = self.world_to_screen(node_logical);
+                let y_offset = if self.characteristics.contains_key(&i) {
+                    6.0 * self.zoom
+                } else {
+                    0.0
+                };
                 let node_x_px = screen_pos_logical.x * scale;
-                let node_y_px = screen_pos_logical.y * scale;
+                let node_y_px = screen_pos_logical.y * scale - y_offset;
 
                 let (label_w_opt, label_h_opt) = buf.size();
                 let label_w = label_w_opt.unwrap_or(96.0) as f32;
