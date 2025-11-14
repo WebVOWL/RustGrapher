@@ -10,6 +10,7 @@ pub use app::init_render;
 /// Exports all the core types of the library.
 pub mod prelude {
     use crate::web::event_dispatcher::EventDispatcher;
+    pub use crate::web::renderer::node_types::NodeType;
     pub use crate::web::simulator::ressources::events::SimulatorEvent;
     pub use crate::web::simulator::ressources::simulator_vars::{
         Damping, DeltaTime, FreezeThreshold, GravityForce, QuadTreeTheta, RepelForce,

@@ -1,5 +1,5 @@
 mod node_shape;
-mod node_types;
+pub mod node_types;
 mod vertex_buffer;
 
 use crate::web::{
