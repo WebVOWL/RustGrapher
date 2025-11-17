@@ -1,4 +1,4 @@
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartielEq, Eq)]
 pub enum NodeType {
     Class,
     ExternalClass,
