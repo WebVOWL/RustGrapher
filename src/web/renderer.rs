@@ -1418,12 +1418,12 @@ impl State {
         );
     }
 
-    pub fn handle_external_events(&self) {
+    pub fn handle_external_events(&mut self) {
         for event in EVENT_DISPATCHER
             .rend_chan
             .read()
             .unwrap()
-            .read(self.reader_id)
+            .read(&mut self.reader_id)
         {
             match event {
                 RenderEvent::ElementFiltered(node_type) => todo!(),
@@ -1431,7 +1431,7 @@ impl State {
                 RenderEvent::Paused => self.paused = true,
                 RenderEvent::Resumed => self.paused = false,
                 RenderEvent::Zoomed(zoom) => {
-                    let delta = MouseScrollDelta::PixelDelta(PhysicalPosition { x: 0.0, y: zoom });
+                    let delta = MouseScrollDelta::PixelDelta(PhysicalPosition { x: 0.0, y: *zoom });
                     self.handle_scroll(delta);
                 }
             }
