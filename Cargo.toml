@@ -17,7 +17,7 @@
     name="grapher"
     readme="README.md"
     repository="https://github.com/WebVOWL/RustGrapher"
-    version="0.3.3"
+    version="0.4.3"
 
 [lib]
     crate-type=["cdylib", "rlib"]
