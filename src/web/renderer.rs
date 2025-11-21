@@ -1,10 +1,11 @@
+pub mod events;
 mod node_shape;
 pub mod node_types;
 mod vertex_buffer;
 
 use crate::web::{
     prelude::EVENT_DISPATCHER,
-    renderer::{node_shape::NodeShape, node_types::NodeType},
+    renderer::{events::RenderEvent, node_shape::NodeShape, node_types::NodeType},
     simulator::{Simulator, components::nodes::Position, ressources::events::SimulatorEvent},
 };
 use glam::Vec2;
@@ -13,7 +14,7 @@ use glyphon::{
     SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
 use log::info;
-use specs::{Join, WorldExt};
+use specs::{Join, ReaderId, WorldExt};
 use std::{cmp::min, collections::HashMap, sync::Arc};
 use vertex_buffer::{NodeInstance, VERTICES, Vertex, ViewUniforms};
 #[cfg(target_arch = "wasm32")]
@@ -70,6 +71,9 @@ pub struct State {
     last_pan_position: Option<Vec2>, // Screen space
     pan: Vec2,
     zoom: f32,
+
+    // Events
+    reader_id: ReaderId<RenderEvent>,
 
     // Glyphon resources are initialized lazily when we have a non-zero surface.
     font_system: Option<FontSystem>,
@@ -703,6 +707,12 @@ impl State {
         // If the surface is already configured (non-zero initial size), initialize glyphon now.
         // Helper below will create FontSystem, SwashCache, Viewport, TextAtlas, TextRenderer and buffers.
 
+        let reader_id = EVENT_DISPATCHER
+            .rend_chan
+            .write()
+            .unwrap()
+            .register_reader();
+
         let mut state = Self {
             surface,
             device,
@@ -734,6 +744,7 @@ impl State {
             frame_count: 0,
             simulator,
             paused: false,
+            reader_id,
             cursor_position: None,
             node_dragged: false,
             pan_active: false,
@@ -1345,6 +1356,7 @@ impl State {
     }
 
     pub fn update(&mut self) {
+        self.handle_external_events();
         if !self.paused {
             self.simulator.tick();
         }
@@ -1404,6 +1416,26 @@ impl State {
             0,
             bytemuck::cast_slice(&node_instances),
         );
+    }
+
+    pub fn handle_external_events(&mut self) {
+        for event in EVENT_DISPATCHER
+            .rend_chan
+            .read()
+            .unwrap()
+            .read(&mut self.reader_id)
+        {
+            match event {
+                RenderEvent::ElementFiltered(node_type) => todo!(),
+                RenderEvent::ElementShown(node_type) => todo!(),
+                RenderEvent::Paused => self.paused = true,
+                RenderEvent::Resumed => self.paused = false,
+                RenderEvent::Zoomed(zoom) => {
+                    let delta = MouseScrollDelta::PixelDelta(PhysicalPosition { x: 0.0, y: *zoom });
+                    self.handle_scroll(delta);
+                }
+            }
+        }
     }
 
     pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
