@@ -1,7 +1,7 @@
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
-#[derive(Copy, Clone, Debug, EnumIter)]
+#[derive(Copy, Clone, Debug, EnumIter, PartialEq, Eq, Hash)]
 pub enum NodeType {
     Class,
     ExternalClass,
@@ -16,6 +16,8 @@ pub enum NodeType {
     Literal,
     RdfsClass,
     RdfsResource,
+
+    // Properties
     Datatype,
     ObjectProperty,
     DatatypeProperty,

@@ -1,41 +1,34 @@
+pub mod events;
 mod node_shape;
-mod node_types;
+pub mod node_types;
 mod vertex_buffer;
 
 use crate::web::{
-    renderer::node_shape::NodeShape,
-    renderer::node_types::NodeType,
+    prelude::EVENT_DISPATCHER,
+    renderer::{events::RenderEvent, node_shape::NodeShape, node_types::NodeType},
     simulator::{Simulator, components::nodes::Position, ressources::events::SimulatorEvent},
 };
 use glam::Vec2;
 use glyphon::{
-    Attrs, Buffer as GlyphBuffer, BufferLine, Cache, Color, Family, FontSystem, Metrics,
-    Resolution, Shaping, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
+    Attrs, Buffer as GlyphBuffer, Cache, Color, Family, FontSystem, Metrics, Resolution, Shaping,
+    SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
 use log::info;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use specs::shrev::EventChannel;
-use specs::{Join, WorldExt};
+use specs::{Join, ReaderId, WorldExt};
 use std::{cmp::min, collections::HashMap, sync::Arc};
 use strum::IntoEnumIterator;
-use vertex_buffer::{NodeInstance, VERTICES, Vertex};
+use vertex_buffer::{NodeInstance, VERTICES, Vertex, ViewUniforms};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
-use wgpu::{Face, util::DeviceExt};
-use winit::dpi::PhysicalPosition;
+use wgpu::util::DeviceExt;
 use winit::event::MouseButton;
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::EventLoopExtWebSys;
-use winit::{
-    application::ApplicationHandler,
-    event::*,
-    event_loop::{ActiveEventLoop, EventLoop},
-    keyboard::{KeyCode, PhysicalKey},
-    window::Window,
-};
+use winit::{dpi::PhysicalPosition, event::MouseScrollDelta};
+use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
 pub struct State {
-    #[cfg(target_arch = "wasm32")]
+    // #[cfg(target_arch = "wasm32")]
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -44,7 +37,8 @@ pub struct State {
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     num_vertices: u32,
-    resolution_buffer: wgpu::Buffer,
+    view_uniform_buffer: wgpu::Buffer,
+    view_uniforms: ViewUniforms, // Store CPU-side copy
     // bind group for group(0): binding 0 = resolution uniform only
     bind_group0: wgpu::BindGroup,
     // instance buffer with node positions (array<vec2<f32>>), bound as vertex buffer slot 1
@@ -52,8 +46,11 @@ pub struct State {
     // number of instances (length of node positions)
     num_instances: u32,
     edge_pipeline: wgpu::RenderPipeline,
-    edge_instance_buffer: wgpu::Buffer,
-    num_edge_instances: u32,
+    edge_vertex_buffer: wgpu::Buffer,
+    num_edge_vertices: u32,
+    arrow_pipeline: wgpu::RenderPipeline,
+    arrow_vertex_buffer: wgpu::Buffer,
+    num_arrow_vertices: u32,
 
     // Node and edge coordinates in pixels
     positions: Vec<[f32; 2]>,
@@ -63,6 +60,7 @@ pub struct State {
     node_types: Vec<NodeType>,
     node_shapes: Vec<NodeShape>,
     cardinalities: Vec<(u32, (String, Option<String>))>,
+    characteristics: HashMap<usize, String>,
     frame_count: u64, // TODO: Remove after implementing simulator
     simulator: Simulator<'static, 'static>,
     paused: bool,
@@ -70,6 +68,13 @@ pub struct State {
     // User input
     cursor_position: Option<Vec2>,
     node_dragged: bool,
+    pan_active: bool,
+    last_pan_position: Option<Vec2>, // Screen space
+    pan: Vec2,
+    zoom: f32,
+
+    // Events
+    reader_id: ReaderId<RenderEvent>,
 
     // Glyphon resources are initialized lazily when we have a non-zero surface.
     font_system: Option<FontSystem>,
@@ -85,7 +90,7 @@ pub struct State {
 
 impl State {
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
-        // Check if we can use WebGPU (as if this writing it's only enabled in some browsers)
+        // Check if we can use WebGPU (as of this writing it's only enabled in some browsers)
         let is_webgpu_enabled = wgpu::util::is_browser_webgpu_supported().await;
 
         // Pick appropriate render backends
@@ -174,7 +179,7 @@ impl State {
                     // binding 0: resolution uniform (vec4<f32>) used in vertex shader
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
@@ -185,11 +190,17 @@ impl State {
                 ],
             });
 
-        // Create resolution uniform buffer
-        let resolution_data = [size.width as f32, size.height as f32, 0.0f32, 0.0f32];
-        let resolution_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Resolution Buffer"),
-            contents: bytemuck::cast_slice(&resolution_data),
+        // Create View uniform buffer
+        let view_uniforms = ViewUniforms {
+            resolution: [size.width as f32, size.height as f32],
+            pan: [0.0, 0.0],
+            zoom: 1.0,
+            _padding: 0.0,
+        };
+
+        let view_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("View Uniform Buffer"),
+            contents: bytemuck::cast_slice(&[view_uniforms]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -279,6 +290,7 @@ impl State {
             [6, 21, 7],
             [4, 22, 4],
             [2, 23, 5],
+            [5, 23, 2],
         ];
 
         let cardinalities: Vec<(u32, (String, Option<String>))> = vec![
@@ -287,6 +299,10 @@ impl State {
             (1, ("1".to_string(), Some("10".to_string()))),
             (10, ("5".to_string(), Some("10".to_string()))),
         ];
+
+        let mut characteristics = HashMap::new();
+        characteristics.insert(21, "transitive".to_string());
+        characteristics.insert(23, "functional\ninverse functional".to_string());
 
         // FontSystem instance for text measurement
         let mut font_system =
@@ -356,7 +372,7 @@ impl State {
                 },
                 None => {}
             }
-            let mut current_text = label_text.clone();
+            let current_text = label_text.clone();
 
             temp_buffer.set_wrap(&mut font_system, glyphon::Wrap::Word);
             temp_buffer.set_size(&mut font_system, Some(capped_width), None);
@@ -419,7 +435,7 @@ impl State {
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &resolution_buffer,
+                    buffer: &view_uniform_buffer,
                     offset: 0,
                     size: None,
                 }),
@@ -485,14 +501,15 @@ impl State {
 
         let num_vertices = VERTICES.len() as u32;
 
-        let edge_instance_buffer = vertex_buffer::create_edge_instance_buffer(
-            &device,
-            &edges,
-            &positions,
-            &node_shapes,
-            &node_types,
-        );
-        let num_edge_instances = edges.len() as u32;
+        let (edge_vertex_buffer, num_edge_vertices, arrow_vertex_buffer, num_arrow_vertices) =
+            vertex_buffer::create_edge_vertex_buffer(
+                &device,
+                &edges,
+                &positions,
+                &node_shapes,
+                &node_types,
+                1.0,
+            );
 
         let edge_shader =
             device.create_shader_module(wgpu::include_wgsl!("./renderer/edge_shader.wgsl"));
@@ -503,7 +520,45 @@ impl State {
             vertex: wgpu::VertexState {
                 module: &edge_shader,
                 entry_point: Some("vs_edge_main"),
-                buffers: &[Vertex::desc(), vertex_buffer::EdgeInstance::desc()],
+                buffers: &[vertex_buffer::EdgeVertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &edge_shader,
+                entry_point: Some("fs_edge_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
+        let arrow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Arrow Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &edge_shader,
+                entry_point: Some("vs_edge_main"),
+                buffers: &[vertex_buffer::EdgeVertex::desc()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -520,12 +575,9 @@ impl State {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
+                cull_mode: None,
                 polygon_mode: wgpu::PolygonMode::Fill,
-                // Requires Features::DEPTH_CLIP_CONTROL
                 unclipped_depth: false,
-                // Requires Features::CONSERVATIVE_RASTERIZATION
                 conservative: false,
             },
             depth_stencil: None,
@@ -568,13 +620,15 @@ impl State {
                 .get(&(usize::min(start, end), usize::max(start, end)))
                 .unwrap()
                 .len();
-            if num_neighbors < 2 {
+            if num_neighbors < 2
+                || (matches!(node_types[center], NodeType::InverseProperty) && num_neighbors <= 2)
+            {
                 solitary_edges.push([start, center, end]);
             }
         }
 
         let mut sim_nodes = Vec::with_capacity(positions.len());
-        for (i, pos) in positions.iter().enumerate() {
+        for pos in positions.iter() {
             sim_nodes.push(Vec2::new(pos[0], pos[1]));
         }
 
@@ -592,7 +646,7 @@ impl State {
             }
         }
 
-        let mut simulator = Simulator::builder().build(sim_nodes, sim_edges, sim_sizes);
+        let simulator = Simulator::builder().build(sim_nodes, sim_edges, sim_sizes);
 
         // Glyphon: do not create heavy glyphon resources unless we have a non-zero surface.
         // Initialize them lazily below (or on first resize).
@@ -610,6 +664,12 @@ impl State {
         // If the surface is already configured (non-zero initial size), initialize glyphon now.
         // Helper below will create FontSystem, SwashCache, Viewport, TextAtlas, TextRenderer and buffers.
 
+        let reader_id = EVENT_DISPATCHER
+            .rend_chan
+            .write()
+            .unwrap()
+            .register_reader();
+
         let mut state = Self {
             surface,
             device,
@@ -619,25 +679,35 @@ impl State {
             render_pipeline,
             vertex_buffer,
             num_vertices,
-            resolution_buffer,
+            view_uniform_buffer,
+            view_uniforms,
             bind_group0,
             node_instance_buffer,
             num_instances,
             edge_pipeline,
-            edge_instance_buffer,
-            num_edge_instances,
-            positions: positions, //.to_vec(),
+            edge_vertex_buffer,
+            num_edge_vertices,
+            arrow_pipeline,
+            arrow_vertex_buffer,
+            num_arrow_vertices,
+            positions: positions.to_vec(),
             labels,
             edges: edges.to_vec(),
             solitary_edges,
             node_types: node_types.to_vec(),
             node_shapes,
             cardinalities,
+            characteristics,
             frame_count: 0,
             simulator,
             paused: false,
+            reader_id,
             cursor_position: None,
             node_dragged: false,
+            pan_active: false,
+            last_pan_position: None,
+            pan: Vec2::ZERO,
+            zoom: 1.0,
             font_system,
             swash_cache,
             viewport,
@@ -653,6 +723,30 @@ impl State {
         }
 
         Ok(state)
+    }
+    // --- Coordinate Conversion Helpers ---
+
+    /// Converts screen-space pixel coordinates (Y-down) to world-space coordinates (Y-up)
+    fn screen_to_world(&self, screen_pos: Vec2) -> Vec2 {
+        let screen_center = Vec2::new(
+            self.config.width as f32 / 2.0,
+            self.config.height as f32 / 2.0,
+        );
+        let screen_offset_px = screen_pos - screen_center;
+        let world_rel_zoomed = Vec2::new(screen_offset_px.x, -screen_offset_px.y);
+        let world_rel = world_rel_zoomed / self.zoom;
+        world_rel + self.pan
+    }
+
+    /// Converts world-space coordinates (Y-up) to screen-space pixel coordinates (Y-down)
+    fn world_to_screen(&self, world_pos: Vec2) -> Vec2 {
+        let screen_center = Vec2::new(
+            self.config.width as f32 / 2.0,
+            self.config.height as f32 / 2.0,
+        );
+        let world_rel = world_pos - self.pan;
+        let screen_offset_px = Vec2::new(world_rel.x, -world_rel.y) * self.zoom;
+        screen_center + screen_offset_px
     }
 
     // Initialize glyphon resources and create one text buffer per node.
@@ -691,14 +785,17 @@ impl State {
             let (label_width, label_height) = match self.node_shapes[i] {
                 NodeShape::Rectangle { w, .. } => {
                     // Calculate physical pixel width from shape's width multiplier
-                    let height = match self.node_types[i] {
+                    let mut height = match self.node_types[i] {
                         NodeType::InverseProperty => 48.0,
                         _ => 12.0,
+                    };
+                    if self.characteristics.contains_key(&i) {
+                        height += 24.0;
                     };
                     (w * 85.0 * scale, height * scale)
                 }
                 NodeShape::Circle { r } => {
-                    let height = match self.node_types[i] {
+                    let mut height = match self.node_types[i] {
                         NodeType::ExternalClass
                         | NodeType::DeprecatedClass
                         | NodeType::EquivalentClass
@@ -708,6 +805,9 @@ impl State {
                         | NodeType::Complement
                         | NodeType::Intersection => 36.0,
                         _ => 24.0,
+                    };
+                    if self.characteristics.contains_key(&i) {
+                        height += 24.0;
                     };
                     let width = match self.node_types[i] {
                         NodeType::Union
@@ -724,71 +824,115 @@ impl State {
             // sample label using the NodeType
             let attrs = &Attrs::new().family(Family::SansSerif);
             let node_type_metrics = Metrics::new(font_px - 3.0, line_px);
-            let mut all_owned_labels: Vec<String> = Vec::new();
-            let spans = match self.node_types[i] {
+            let mut owned_spans: Vec<(String, Attrs)> = Vec::new();
+            match self.node_types[i] {
                 NodeType::EquivalentClass => {
                     // TODO: Update when handling equivalent classes from ontology
-                    let mut labels: Vec<&str> = label.split('\n').collect();
-                    let label1 = labels.get(0).map_or("", |v| *v);
-                    let eq_labels = labels.split_off(1);
-                    let (last_label, eq_labels) = eq_labels.split_last().unwrap_or((&"", &[]));
-
-                    let mut eq_labels_attributes: Vec<(&str, _)> = Vec::new();
-                    for eq_label in eq_labels {
-                        let mut extended_label = eq_label.to_string();
-                        extended_label.push_str(", ");
-                        all_owned_labels.push(extended_label);
+                    let mut parts: Vec<&str> = label.split('\n').collect();
+                    let label1 = parts.get(0).map_or("", |v| *v).to_string();
+                    let eq_labels = parts.split_off(1);
+                    if !eq_labels.is_empty() {
+                        owned_spans.push((label1, attrs.clone()));
+                        owned_spans.push(("\n".to_string(), attrs.clone()));
+                        for (idx, eq) in eq_labels.iter().enumerate() {
+                            let mut s = eq.to_string();
+                            if idx + 1 < eq_labels.len() {
+                                s.push_str(", ");
+                            }
+                            owned_spans.push((s, attrs.clone()));
+                        }
+                    } else {
+                        owned_spans.push((label1, attrs.clone()));
                     }
-                    all_owned_labels.push(last_label.to_string());
-
-                    for extended_label in &all_owned_labels {
-                        eq_labels_attributes.push((extended_label.as_str(), attrs.clone()));
-                    }
-
-                    let mut combined_labels = vec![(label1, attrs.clone()), ("\n", attrs.clone())];
-                    combined_labels.append(&mut eq_labels_attributes);
-
-                    combined_labels
                 }
                 NodeType::InverseProperty => {
-                    let labels: Vec<&str> = label.split('\n').collect();
-                    let mut label1 = labels.get(0).map_or("", |v| *v).to_string();
-                    label1.push_str("\n\n\n");
-                    let label2 = labels.get(1).map_or("", |v| *v);
-                    all_owned_labels.push(label1);
-                    all_owned_labels.push(label2.to_string());
-                    let mut labels_attributes: Vec<(&str, _)> = Vec::new();
-                    for extended_label in &all_owned_labels {
-                        labels_attributes.push((extended_label.as_str(), attrs.clone()));
+                    if let Some(chs) = self.characteristics.get(&i) {
+                        let (ch1, ch2) = chs.split_once("\n").unwrap_or((chs, ""));
+                        let labels_vec: Vec<&str> = label.split('\n').collect();
+                        let label1 = labels_vec.get(0).map_or("", |v| *v).to_string();
+                        owned_spans.push((label1, attrs.clone()));
+                        owned_spans.push((
+                            format!("\n({})\n\n", ch1),
+                            attrs.clone().metrics(node_type_metrics),
+                        ));
+                        let label2 = labels_vec.get(1).map_or("", |v| *v).to_string();
+                        owned_spans.push((label2, attrs.clone()));
+                        owned_spans.push((
+                            format!("\n({})", ch2),
+                            attrs.clone().metrics(node_type_metrics),
+                        ));
+                    } else {
+                        let labels_vec: Vec<&str> = label.split('\n').collect();
+                        let mut label1 = labels_vec.get(0).map_or("", |v| *v).to_string();
+                        label1.push_str("\n\n\n");
+                        let label2 = labels_vec.get(1).map_or("", |v| *v).to_string();
+                        owned_spans.push((label1, attrs.clone()));
+                        owned_spans.push((label2, attrs.clone()));
                     }
-                    labels_attributes
                 }
-                NodeType::ExternalClass => vec![
-                    (label.as_str(), attrs.clone()),
-                    ("\n(external)", attrs.clone().metrics(node_type_metrics)),
-                ],
-                NodeType::DeprecatedClass => vec![
-                    (label.as_str(), attrs.clone()),
-                    ("\n(deprecated)", attrs.clone().metrics(node_type_metrics)),
-                ],
-                NodeType::DisjointWith => vec![
-                    (label.as_str(), attrs.clone()),
-                    ("\n\n(disjoint)", attrs.clone().metrics(node_type_metrics)),
-                ],
-                NodeType::Thing => vec![("Thing", attrs.clone())],
+                NodeType::ExternalClass => {
+                    owned_spans.push((label.to_string(), attrs.clone()));
+                    owned_spans.push((
+                        "\n(external)".to_string(),
+                        attrs.clone().metrics(node_type_metrics),
+                    ));
+                }
+                NodeType::DeprecatedClass => {
+                    owned_spans.push((label.to_string(), attrs.clone()));
+                    owned_spans.push((
+                        "\n(deprecated)".to_string(),
+                        attrs.clone().metrics(node_type_metrics),
+                    ));
+                }
+                NodeType::DisjointWith => {
+                    owned_spans.push((label.to_string(), attrs.clone()));
+                    owned_spans.push((
+                        "\n\n(disjoint)".to_string(),
+                        attrs.clone().metrics(node_type_metrics),
+                    ));
+                }
+                NodeType::Thing => {
+                    owned_spans.push(("Thing".to_string(), attrs.clone()));
+                }
                 NodeType::Complement => {
-                    vec![(label.as_str(), attrs.clone()), ("\n\n¬", attrs.clone())]
+                    owned_spans.push((label.to_string(), attrs.clone()));
+                    owned_spans.push(("\n\n¬".to_string(), attrs.clone()));
                 }
                 NodeType::DisjointUnion => {
-                    vec![(label.as_str(), attrs.clone()), ("\n\n1", attrs.clone())]
+                    owned_spans.push((label.to_string(), attrs.clone()));
+                    owned_spans.push(("\n\n1".to_string(), attrs.clone()));
                 }
                 NodeType::Intersection => {
-                    vec![(label.as_str(), attrs.clone()), ("\n\n∩", attrs.clone())]
+                    owned_spans.push((label.to_string(), attrs.clone()));
+                    owned_spans.push(("\n\n∩".to_string(), attrs.clone()));
                 }
-                NodeType::Union => vec![(label.as_str(), attrs.clone()), ("\n\n∪", attrs.clone())],
-                NodeType::SubclassOf => vec![("Subclass of", attrs.clone())],
-                _ => vec![(label.as_str(), attrs.clone())],
-            };
+                NodeType::Union => {
+                    owned_spans.push((label.to_string(), attrs.clone()));
+                    owned_spans.push(("\n\n∪".to_string(), attrs.clone()));
+                }
+                NodeType::SubclassOf => {
+                    owned_spans.push(("Subclass of".to_string(), attrs.clone()));
+                }
+                _ => {
+                    owned_spans.push((label.to_string(), attrs.clone()));
+                }
+            }
+
+            // Append characteristic as a small parenthesized suffix if present.
+            if !matches!(self.node_types[i], NodeType::InverseProperty) {
+                if let Some(ch) = self.characteristics.get(&i) {
+                    owned_spans.push((
+                        format!("\n({})", ch),
+                        attrs.clone().metrics(node_type_metrics),
+                    ));
+                }
+            }
+
+            let spans: Vec<(&str, Attrs)> = owned_spans
+                .iter()
+                .map(|(s, a)| (s.as_str(), a.clone()))
+                .collect();
+
             buf.set_rich_text(
                 &mut font_system,
                 spans,
@@ -851,15 +995,12 @@ impl State {
                 self.init_glyphon();
             }
 
-            // update GPU resolution uniform
-            let data = [width as f32, height as f32, 0.0f32, 0.0f32];
-            self.queue
-                .write_buffer(&self.resolution_buffer, 0, bytemuck::cast_slice(&data));
-
-            self.simulator.send_event(SimulatorEvent::WindowResized {
-                width: width,
-                height: height,
-            });
+            EVENT_DISPATCHER.sim_chan.write().unwrap().single_write(
+                SimulatorEvent::WindowResized {
+                    width: width,
+                    height: height,
+                },
+            );
         }
     }
 
@@ -870,35 +1011,20 @@ impl State {
             return Ok(());
         }
 
-        // If glyphon isn't initialized yet, skip text rendering for now.
-        if let (
-            Some(font_system),
-            Some(swash_cache),
-            Some(viewport),
-            Some(atlas),
-            Some(text_renderer),
-            Some(text_buffers),
-        ) = (
-            self.font_system.as_mut(),
-            self.swash_cache.as_mut(),
-            self.viewport.as_mut(),
-            self.atlas.as_mut(),
-            self.text_renderer.as_mut(),
-            self.text_buffers.as_ref(),
-        ) {
-            let scale = self.window.scale_factor() as f32;
-            // physical viewport height in pixels:
-            let vp_h_px = self.config.height as f32 * scale as f32;
-            let vp_w_px = self.config.width as f32 * scale as f32;
+        // Calculate text areas
+        let mut areas: Vec<TextArea> = Vec::new();
+        let scale = self.window.scale_factor() as f32;
+        let vp_h_px = self.config.height as f32 * scale as f32;
+        let vp_w_px = self.config.width as f32 * scale as f32;
 
-            let mut areas: Vec<TextArea> = Vec::new();
+        if let Some(text_buffers) = self.text_buffers.as_ref() {
             for (i, buf) in text_buffers.iter().enumerate() {
                 // node logical coords
                 let node_logical = match self.node_types[i] {
                     NodeType::InverseProperty => {
                         let position_x = self.positions[i][0];
                         let position_y = self.positions[i][1] + 18.0;
-                        [position_x, position_y]
+                        Vec2::new(position_x, position_y)
                     }
                     NodeType::Complement
                     | NodeType::DisjointUnion
@@ -906,142 +1032,189 @@ impl State {
                     | NodeType::Intersection => {
                         let position_x = self.positions[i][0];
                         let position_y = self.positions[i][1] + 24.0;
-                        [position_x, position_y]
+                        Vec2::new(position_x, position_y)
                     }
-                    _ => self.positions[i],
+                    _ => Vec2::new(self.positions[i][0], self.positions[i][1]),
                 };
 
                 // convert node coords to physical pixels
-                let node_x_px = node_logical[0] * scale;
-                let node_y_px = vp_h_px - node_logical[1] * scale;
+                let screen_pos_logical = self.world_to_screen(node_logical);
+                let y_offset = if self.characteristics.contains_key(&i) {
+                    6.0 * self.zoom
+                } else {
+                    0.0
+                };
+                let node_x_px = screen_pos_logical.x * scale;
+                let node_y_px = screen_pos_logical.y * scale - y_offset;
 
                 let (label_w_opt, label_h_opt) = buf.size();
                 let label_w = label_w_opt.unwrap_or(96.0) as f32;
                 let label_h = label_h_opt.unwrap_or(24.0) as f32;
 
-                // center horizontally on node
-                let left = node_x_px - label_w * 0.5;
+                let scaled_label_w = label_w * self.zoom;
+                let scaled_label_h = label_h * self.zoom;
 
-                let line_height = 8.0;
+                // skip text rendering for nodes outside the viewport
+                if node_x_px < -scaled_label_w * 0.4
+                    || node_x_px > vp_w_px + scaled_label_w * 0.4
+                    || node_y_px < -scaled_label_h * 0.4
+                    || node_y_px > vp_h_px + scaled_label_h * 0.4
+                {
+                    continue;
+                }
+
+                // center horizontally on node
+                let left = node_x_px - scaled_label_w * 0.5;
+
+                let line_height = 8.0; // Base physical pixels
                 // top = distance from top in physical pixels
                 let top = match self.node_types[i] {
-                    NodeType::EquivalentClass => node_y_px - 2.0 * line_height,
-                    _ => node_y_px - line_height,
+                    NodeType::EquivalentClass => node_y_px - 2.0 * line_height * self.zoom,
+                    _ => node_y_px - line_height * self.zoom,
                 };
 
                 areas.push(TextArea {
                     buffer: buf,
                     left,
                     top,
-                    scale: 1.0,
+                    scale: self.zoom,
                     bounds: TextBounds {
                         left: left as i32,
                         top: top as i32,
-                        right: (left + label_w) as i32,
-                        bottom: (top + label_h) as i32,
+                        right: (left + scaled_label_w) as i32,
+                        bottom: (top + scaled_label_h) as i32,
                     },
                     default_color: Color::rgb(0, 0, 0),
                     custom_glyphs: &[],
                 });
             }
+        }
 
-            // cardinalities
-            if let Some(card_buffers) = self.cardinality_text_buffers.as_ref() {
-                for (edge_idx, buf) in card_buffers.iter() {
-                    // make sure edge index is valid
-                    if *edge_idx >= self.edges.len() {
-                        continue;
-                    }
-                    let edge = self.edges[*edge_idx];
-                    let center_idx = edge[1];
-                    let end_idx = edge[2];
-
-                    // node logical coords
-                    let center_log = self.positions[center_idx];
-                    let end_log = self.positions[end_idx];
-
-                    // convert to physical pixels
-                    let center_x_px = center_log[0] * scale;
-                    let center_y_px = vp_h_px - center_log[1] * scale;
-                    let end_x_px = end_log[0] * scale;
-                    let end_y_px = vp_h_px - end_log[1] * scale;
-
-                    // direction vector (center - start) in physical pixel space
-                    let dir_x = center_x_px - end_x_px;
-                    let dir_y = center_y_px - end_y_px;
-                    let radius_pix = 50.0;
-
-                    let (offset_px_x, offset_px_y) = match self.node_shapes[end_idx] {
-                        NodeShape::Circle { r } => (
-                            (radius_pix + 15.0) * r * scale,
-                            (radius_pix + 15.0) * r * scale,
-                        ),
-                        NodeShape::Rectangle { w, h } => {
-                            let half_w_px = (w * 0.9 / 2.0) * radius_pix;
-                            let half_h_px = (h * 0.25 / 2.0) * radius_pix;
-
-                            let len = (dir_x * dir_x + dir_y * dir_y).sqrt().max(1.0);
-                            let nx = dir_x / len;
-                            let ny = dir_y / len;
-
-                            // Compute intersection with rectangle perimeter in direction (nx, ny)
-                            let tx = if nx.abs() > 1e-6 {
-                                half_w_px / nx.abs()
-                            } else {
-                                f32::INFINITY
-                            };
-                            let ty = if ny.abs() > 1e-6 {
-                                half_h_px / ny.abs()
-                            } else {
-                                f32::INFINITY
-                            };
-
-                            // Intersection distance is the smaller of the two
-                            let t = tx.min(ty);
-
-                            // Add padding to place the label away from the edge
-                            let padding = 45.0;
-                            let dist = t + padding;
-
-                            // Return the final scalar distance for both axes
-                            (dist, dist)
-                        }
-                    };
-
-                    // normalized direction (guard against zero-length)
-                    let len = (dir_x * dir_x + dir_y * dir_y).sqrt().max(1.0);
-                    let nx: f32 = dir_x / len;
-                    let ny = dir_y / len;
-
-                    // place label at end node plus offset along the center-->end angle
-                    let card_x_px = end_x_px + nx * offset_px_x;
-                    let card_y_px = end_y_px + ny * offset_px_y;
-
-                    // compute bounds from buffer size and center the label
-                    let (label_w_opt, label_h_opt) = buf.size();
-                    let label_w = label_w_opt.unwrap_or(48.0) as f32;
-                    let label_h = label_h_opt.unwrap_or(24.0) as f32;
-
-                    let left = card_x_px - label_w * 0.5;
-                    let top = card_y_px - label_h * 0.5;
-
-                    areas.push(TextArea {
-                        buffer: buf,
-                        left,
-                        top,
-                        scale: 1.0,
-                        bounds: TextBounds {
-                            left: left as i32,
-                            top: top as i32,
-                            right: (left + label_w) as i32,
-                            bottom: (top + label_h) as i32,
-                        },
-                        default_color: Color::rgb(0, 0, 0),
-                        custom_glyphs: &[],
-                    });
+        // cardinalities
+        if let Some(card_buffers) = self.cardinality_text_buffers.as_ref() {
+            for (edge_idx, buf) in card_buffers.iter() {
+                // make sure edge index is valid
+                if *edge_idx >= self.edges.len() {
+                    continue;
                 }
-            }
+                let edge = self.edges[*edge_idx];
+                let center_idx = edge[1];
+                let end_idx = edge[2];
 
+                // node logical coords
+                let center_log_world =
+                    Vec2::new(self.positions[center_idx][0], self.positions[center_idx][1]);
+                let end_log_world =
+                    Vec2::new(self.positions[end_idx][0], self.positions[end_idx][1]);
+
+                // direction vector (center - end) in WORLD space
+                let dir_world_x = center_log_world.x - end_log_world.x;
+                let dir_world_y = center_log_world.y - end_log_world.y;
+
+                let radius_world: f32 = 50.0;
+                let padding_world = 15.0;
+                let padding_world_rect = 45.0;
+
+                let (offset_world_x, offset_world_y) = match self.node_shapes[end_idx] {
+                    NodeShape::Circle { r } => (
+                        (radius_world + padding_world) * r,
+                        (radius_world + padding_world) * r,
+                    ),
+                    NodeShape::Rectangle { w, h } => {
+                        let half_w_world = (w * 0.9 / 2.0) * radius_world;
+                        let half_h_world = (h * 0.25 / 2.0) * radius_world;
+
+                        let len_world = (dir_world_x * dir_world_x + dir_world_y * dir_world_y)
+                            .sqrt()
+                            .max(1.0);
+                        let nx_world = dir_world_x / len_world;
+                        let ny_world = dir_world_y / len_world;
+
+                        // Compute intersection with rectangle perimeter in direction (nx, ny)
+                        let tx = if nx_world.abs() > 1e-6 {
+                            half_w_world / nx_world.abs()
+                        } else {
+                            f32::INFINITY
+                        };
+                        let ty = if ny_world.abs() > 1e-6 {
+                            half_h_world / ny_world.abs()
+                        } else {
+                            f32::INFINITY
+                        };
+                        let t = tx.min(ty);
+
+                        let dist = t + padding_world_rect;
+                        (dist, dist)
+                    }
+                };
+                // normalized world direction (guard against zero-length)
+                let len_world = (dir_world_x * dir_world_x + dir_world_y * dir_world_y)
+                    .sqrt()
+                    .max(1.0);
+                let nx_world = dir_world_x / len_world;
+                let ny_world = dir_world_y / len_world;
+
+                // place label at end node plus offset
+                let card_world_x = end_log_world.x + nx_world * offset_world_x;
+                let card_world_y = end_log_world.y + ny_world * offset_world_y;
+
+                // now convert this final world pos to screen physical pos
+                let card_world_pos = Vec2::new(card_world_x, card_world_y);
+                let card_screen_phys = self.world_to_screen(card_world_pos) * scale;
+
+                let card_x_px = card_screen_phys.x;
+                let card_y_px = card_screen_phys.y;
+
+                // compute bounds from buffer size and center the label
+                let (label_w_opt, _label_h_opt) = buf.size();
+                let label_w = label_w_opt.unwrap_or(48.0) as f32;
+                let label_h = label_w_opt.unwrap_or(24.0) as f32;
+
+                let scaled_label_w = label_w * self.zoom;
+                let scaled_label_h = label_h * self.zoom;
+
+                // skip text rendering for cardinalities outside the viewport
+                if card_x_px < -scaled_label_w * 0.4
+                    || card_x_px > vp_w_px + scaled_label_w * 0.4
+                    || card_y_px < -scaled_label_h * 0.4
+                    || card_y_px > vp_h_px + scaled_label_h * 0.4
+                {
+                    continue;
+                }
+
+                let left = card_x_px - scaled_label_w * 0.5;
+                let top = card_y_px - scaled_label_h * 0.5;
+                areas.push(TextArea {
+                    buffer: buf,
+                    left,
+                    top,
+                    scale: self.zoom,
+                    bounds: TextBounds {
+                        left: left as i32,
+                        top: top as i32,
+                        right: (left + scaled_label_w) as i32,
+                        bottom: (top + scaled_label_h) as i32,
+                    },
+                    default_color: Color::rgb(0, 0, 0),
+                    custom_glyphs: &[],
+                });
+            }
+        }
+
+        // If glyphon isn't initialized yet, skip text rendering for now.
+        if let (
+            Some(font_system),
+            Some(swash_cache),
+            Some(viewport),
+            Some(atlas),
+            Some(text_renderer),
+        ) = (
+            self.font_system.as_mut(),
+            self.swash_cache.as_mut(),
+            self.viewport.as_mut(),
+            self.atlas.as_mut(),
+            self.text_renderer.as_mut(),
+        ) {
             viewport.update(
                 &self.queue,
                 Resolution {
@@ -1049,6 +1222,8 @@ impl State {
                     height: vp_h_px as u32,
                 },
             );
+            // Clear atlas before preparing text to prevent overflow
+            atlas.trim();
             // Prepare glyphon for rendering
             if let Err(e) = text_renderer.prepare(
                 &self.device,
@@ -1098,10 +1273,15 @@ impl State {
 
             // Draw edges
             render_pass.set_pipeline(&self.edge_pipeline);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..)); // quad
-            render_pass.set_vertex_buffer(1, self.edge_instance_buffer.slice(..));
+            render_pass.set_vertex_buffer(0, self.edge_vertex_buffer.slice(..));
             render_pass.set_bind_group(0, &self.bind_group0, &[]);
-            render_pass.draw(0..self.num_vertices, 0..self.num_edge_instances);
+            render_pass.draw(0..self.num_edge_vertices, 0..1);
+
+            // Draw arrow geometry on top of the line strips
+            render_pass.set_pipeline(&self.arrow_pipeline);
+            render_pass.set_vertex_buffer(0, self.arrow_vertex_buffer.slice(..));
+            render_pass.set_bind_group(0, &self.bind_group0, &[]);
+            render_pass.draw(0..self.num_arrow_vertices, 0..1);
 
             // Draw nodes
             render_pass.set_pipeline(&self.render_pipeline);
@@ -1133,9 +1313,20 @@ impl State {
     }
 
     pub fn update(&mut self) {
+        self.handle_external_events();
         if !self.paused {
             self.simulator.tick();
         }
+
+        // Update uniforms
+        self.view_uniforms.pan = self.pan.to_array();
+        self.view_uniforms.zoom = self.zoom;
+        self.view_uniforms.resolution = [self.config.width as f32, self.config.height as f32];
+        self.queue.write_buffer(
+            &self.view_uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[self.view_uniforms]),
+        );
 
         let positions = self.simulator.world.read_storage::<Position>();
         let entities = self.simulator.world.entities();
@@ -1153,30 +1344,55 @@ impl State {
         }
 
         let node_instances = vertex_buffer::build_node_instances(
-            &self.device,
             &self.positions,
             &self.node_types,
             &self.node_shapes,
         );
 
-        let edge_instances = vertex_buffer::build_edge_instances(
+        // Build separate line and arrow vertices and write to their respective buffers
+        let (edge_vertices, arrow_vertices) = vertex_buffer::build_line_and_arrow_vertices(
             &self.edges,
             &self.positions,
             &self.node_shapes,
             &self.node_types,
+            self.zoom,
         );
 
         self.queue.write_buffer(
-            &self.edge_instance_buffer,
+            &self.edge_vertex_buffer,
             0,
-            bytemuck::cast_slice(&edge_instances),
+            bytemuck::cast_slice(&edge_vertices),
         );
-
+        self.queue.write_buffer(
+            &self.arrow_vertex_buffer,
+            0,
+            bytemuck::cast_slice(&arrow_vertices),
+        );
         self.queue.write_buffer(
             &self.node_instance_buffer,
             0,
             bytemuck::cast_slice(&node_instances),
         );
+    }
+
+    pub fn handle_external_events(&mut self) {
+        for event in EVENT_DISPATCHER
+            .rend_chan
+            .read()
+            .unwrap()
+            .read(&mut self.reader_id)
+        {
+            match event {
+                RenderEvent::ElementFiltered(node_type) => todo!(),
+                RenderEvent::ElementShown(node_type) => todo!(),
+                RenderEvent::Paused => self.paused = true,
+                RenderEvent::Resumed => self.paused = false,
+                RenderEvent::Zoomed(zoom) => {
+                    let delta = MouseScrollDelta::PixelDelta(PhysicalPosition { x: 0.0, y: *zoom });
+                    self.handle_scroll(delta);
+                }
+            }
+        }
     }
 
     pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
@@ -1193,39 +1409,113 @@ impl State {
         match (button, is_pressed) {
             (MouseButton::Left, true) => {
                 // Begin node dragging on mouse click
-                // if !self.paused {
                 if let Some(pos) = self.cursor_position {
-                    self.node_dragged = true;
-                    self.simulator.send_event(SimulatorEvent::DragStart(pos));
-
-                    // self.simulator.drag_start(pos);
-                    // }
+                    if !self.pan_active {
+                        self.node_dragged = true;
+                        // Convert screen coordinates to world coordinates
+                        let pos_world = self.screen_to_world(pos);
+                        EVENT_DISPATCHER
+                            .sim_chan
+                            .write()
+                            .unwrap()
+                            .single_write(SimulatorEvent::DragStart(pos_world));
+                    }
                 }
             }
             (MouseButton::Left, false) => {
                 // Stop node dragging on mouse release
-                // if !self.paused {
-                self.node_dragged = false;
-                self.simulator.send_event(SimulatorEvent::DragEnd);
-
-                // self.simulator.drag_end();
-                // }
+                if self.node_dragged {
+                    self.node_dragged = false;
+                    EVENT_DISPATCHER
+                        .sim_chan
+                        .write()
+                        .unwrap()
+                        .single_write(SimulatorEvent::DragEnd);
+                }
+            }
+            (MouseButton::Right, true) => {
+                // Start panning
+                if let Some(pos) = self.cursor_position {
+                    if !self.node_dragged {
+                        self.pan_active = true;
+                        self.last_pan_position = Some(pos);
+                    }
+                }
             }
             (MouseButton::Right, false) => {
-                // Radial menu on mouse release
+                // Stop panning
+                self.pan_active = false;
+                self.last_pan_position = None;
             }
             _ => {}
         }
     }
     pub fn handle_cursor(&mut self, position: PhysicalPosition<f64>) {
         // (x,y) coords in pixels relative to the top-left corner of the window
-        self.cursor_position = Some(Vec2::new(position.x as f32, position.y as f32));
-        if self.node_dragged {
-            if let Some(pos) = self.cursor_position {
-                self.simulator.send_event(SimulatorEvent::Dragged(pos));
+        let pos_screen = Vec2::new(position.x as f32, position.y as f32);
+        self.cursor_position = Some(pos_screen);
 
-                // self.simulator.dragging(pos);
+        if self.node_dragged {
+            // Convert screen coordinates to world coordinates before sending to simulator
+            let pos_world = self.screen_to_world(pos_screen);
+            EVENT_DISPATCHER
+                .sim_chan
+                .write()
+                .unwrap()
+                .single_write(SimulatorEvent::Dragged(pos_world));
+        } else if self.pan_active {
+            if let Some(last_pos_screen) = self.last_pan_position {
+                // 1. Get the world position of the cursor now.
+                let world_pos_current = self.screen_to_world(pos_screen);
+
+                // 2. Get the world position of the cursor at its last position.
+                let world_pos_last = self.screen_to_world(last_pos_screen);
+
+                // 3. The difference is the true world-space delta.
+                let delta_world = world_pos_current - world_pos_last;
+
+                // 4. Adjust the pan by this delta.
+                self.pan -= delta_world;
+
+                // 5. Update the last position.
+                self.last_pan_position = Some(pos_screen);
             }
         }
+    }
+
+    pub fn handle_scroll(&mut self, delta: MouseScrollDelta) {
+        let scroll_amount = match delta {
+            MouseScrollDelta::LineDelta(_, y) => y,
+            MouseScrollDelta::PixelDelta(PhysicalPosition { y, .. }) => (y / 10.0) as f32, // Heuristic
+        };
+        if scroll_amount == 0.0 {
+            return;
+        }
+
+        let cursor_pos_screen = match self.cursor_position {
+            Some(pos) => pos,
+            None => return,
+        };
+
+        // 1. Get world pos under cursor before zoom
+        let world_pos_before = self.screen_to_world(cursor_pos_screen);
+
+        // 2. Calculate new zoom
+        let zoom_sensitivity = 0.1;
+        self.zoom *= 1.0 - scroll_amount * zoom_sensitivity; // scroll up (positive y) = zoom in
+        self.zoom = self.zoom.clamp(0.1, 4.0); // Min/max zoom levels
+
+        // 3. We want the world_pos_before to stay at cursor_pos_screen.
+        //    Find the new pan that makes this true.
+        //    P_new = W_before - (S_cursor - C) / Z_new
+
+        let screen_center = Vec2::new(
+            self.config.width as f32 / 2.0,
+            self.config.height as f32 / 2.0,
+        );
+        let screen_offset = cursor_pos_screen - screen_center;
+        let world_rel_zoomed = Vec2::new(screen_offset.x, -screen_offset.y);
+
+        self.pan = world_pos_before - (world_rel_zoomed / self.zoom);
     }
 }

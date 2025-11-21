@@ -1,32 +1,20 @@
 use crate::web::{
-    quadtree::{BoundingBox2D, QuadTree},
+    quadtree::QuadTree,
     simulator::{
         components::{
             edges::Connects,
             forces::NodeForces,
             nodes::{Dragged, Fixed, Mass, Position, Velocity},
         },
-        ressources::{
-            events::SimulatorEvent,
-            simulator_vars::{
-                Damping, DeltaTime, FreezeThreshold, GravityForce, QuadTreeTheta, RepelForce,
-                SpringNeutralLength, SpringStiffness, WorldSize,
-            },
+        ressources::simulator_vars::{
+            DeltaTime, GravityForce, QuadTreeTheta, RepelForce, SpringNeutralLength,
+            SpringStiffness, WorldSize,
         },
-        systems::position_compute::norm_pos_center,
     },
 };
 use glam::Vec2;
-use log::info;
 use rayon::prelude::*;
-use specs::prelude::*;
-use specs::shrev::EventChannel;
-use specs::{
-    Builder, Dispatcher, DispatcherBuilder, Entities, Join, LazyUpdate, ParJoin, Read, ReadExpect,
-    ReadStorage, ReaderId, System, World, WorldExt, Write, WriteStorage,
-};
-use std::collections::HashMap;
-use winit::dpi::PhysicalSize;
+use specs::{Entities, Join, ParJoin, Read, ReadExpect, ReadStorage, System, WriteStorage};
 
 pub struct ComputeNodeForce;
 
@@ -142,8 +130,7 @@ impl<'a> System<'a> for ComputeGravityForce {
         )
             .par_join()
             .for_each(|(entity, pos, mass, force, _, _)| {
-                let norm_pos = norm_pos_center(pos.0, [world_size.width, world_size.height]);
-                force.0 += norm_pos * mass.0 * gravity_force.0;
+                force.0 += -pos.0 * mass.0 * gravity_force.0;
                 // info!(
                 //     "(CGF) [{0}] f: {1} | p: {2} | m: {3} | g: {4} | np: {5}",
                 //     entity.id(),

@@ -102,12 +102,9 @@ impl ApplicationHandler<State> for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => state.resize(size.width, size.height),
-            // WindowEvent::ScaleFactorChanged {
-            //     scale_factor,
-            //     inner_size_writer,
-            // } => {
-            //     state.resize(width, height);
-            // }
+            WindowEvent::MouseWheel { delta, .. } => {
+                state.handle_scroll(delta);
+            }
             WindowEvent::RedrawRequested => {
                 state.update();
                 match state.render() {
@@ -153,7 +150,7 @@ impl ApplicationHandler<State> for App {
 }
 
 pub fn run() -> anyhow::Result<()> {
-    let event_loop = EventLoop::with_user_event().build()?;
+    let event_loop: EventLoop<State> = EventLoop::with_user_event().build()?;
     let app = App::new(
         #[cfg(target_arch = "wasm32")]
         &event_loop,

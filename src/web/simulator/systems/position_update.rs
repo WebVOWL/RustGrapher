@@ -1,34 +1,14 @@
-use crate::web::{
-    quadtree::{BoundingBox2D, QuadTree},
-    simulator::{
-        components::{
-            edges::Connects,
-            forces::NodeForces,
-            nodes::{Dragged, Fixed, Mass, Position, Velocity},
-        },
-        ressources::{
-            events::SimulatorEvent,
-            simulator_vars::{
-                CursorPosition, Damping, DeltaTime, FreezeThreshold, GravityForce,
-                PointIntersection, QuadTreeTheta, RepelForce, SpringNeutralLength, SpringStiffness,
-                WorldSize,
-            },
-        },
-        systems::position_compute::norm_pos,
+use crate::web::simulator::{
+    components::nodes::{Dragged, Fixed, Position, Velocity},
+    ressources::simulator_vars::{
+        CursorPosition, Damping, DeltaTime, FreezeThreshold, PointIntersection, WorldSize,
     },
 };
-use glam::Vec2;
 use log::info;
 use rayon::prelude::*;
 use specs::prelude::*;
 use specs::shred;
-use specs::shrev::EventChannel;
-use specs::{
-    Builder, Dispatcher, DispatcherBuilder, Entities, Join, LazyUpdate, ParJoin, Read, ReadExpect,
-    ReadStorage, ReaderId, System, World, WorldExt, Write, WriteStorage,
-};
-use std::collections::HashMap;
-use winit::dpi::PhysicalSize;
+use specs::{Entities, Join, LazyUpdate, ParJoin, Read, ReadStorage, WriteStorage};
 
 pub struct UpdateNodePosition;
 
@@ -219,14 +199,8 @@ pub struct DraggingSystemData<'a> {
 /// The position of the dragged node has changed.
 pub fn sys_dragging(data: DraggingSystemData) {
     for (entity, pos, _) in (&data.entities, &data.positions, &data.dragged).join() {
-        // We're calling updater instead of using the position write storage
-        // as it doesn't seem to actually work in a custom system context.
-        let norm_pos = norm_pos(
-            data.cursor_position.0,
-            [data.world_size.width, data.world_size.height],
-        );
+        let world_pos = data.cursor_position.0;
 
-        data.updater.insert(entity, Position(norm_pos));
-        info!("[{0}] Dragged position: {1}", entity.id(), norm_pos,);
+        data.updater.insert(entity, Position(world_pos));
     }
 }

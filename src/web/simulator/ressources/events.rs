@@ -25,7 +25,7 @@ pub enum SimulatorEvent {
 
     /// The simulation's accuracy has been updated.
     /// This represents the quadtree theta value.
-    SimulationAccuracyUpdated(f32),
+    QuadTreeThetaUpdated(f32),
 
     /// The simulation's freeze threshold has been updated.
     /// A node with a velocity below this threshold should not be considered
