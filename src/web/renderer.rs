@@ -19,6 +19,7 @@ use std::{cmp::min, collections::HashMap, sync::Arc};
 use vertex_buffer::{NodeInstance, VERTICES, Vertex, ViewUniforms};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
+use web_time::{Instant, SystemTime};
 use wgpu::util::DeviceExt;
 use winit::event::MouseButton;
 #[cfg(target_arch = "wasm32")]
@@ -60,7 +61,6 @@ pub struct State {
     node_shapes: Vec<NodeShape>,
     cardinalities: Vec<(u32, (String, Option<String>))>,
     characteristics: HashMap<usize, String>,
-    frame_count: u64, // TODO: Remove after implementing simulator
     simulator: Simulator<'static, 'static>,
     paused: bool,
 
@@ -74,6 +74,10 @@ pub struct State {
 
     // Events
     reader_id: ReaderId<RenderEvent>,
+
+    // Performance
+    last_fps_time: Instant,
+    fps_counter: u32,
 
     // Glyphon resources are initialized lazily when we have a non-zero surface.
     font_system: Option<FontSystem>,
@@ -204,7 +208,7 @@ impl State {
         });
 
         // TODO: remove test code after implementing ontology loading
-        let positions = [
+        let mut positions = vec![
             [50.0, 50.0],
             [250.0, 50.0],
             [450.0, 50.0],
@@ -232,7 +236,7 @@ impl State {
             [0.0, 0.0],
             [0.0, 0.0],
         ];
-        let labels = vec![
+        let mut labels = vec![
             String::from("My class"),
             String::from("Rdfs class"),
             String::from("Rdfs resource"),
@@ -261,7 +265,7 @@ impl State {
             String::new(),
         ];
 
-        let node_types = [
+        let mut node_types = vec![
             NodeType::Class,
             NodeType::RdfsClass,
             NodeType::RdfsResource,
@@ -290,7 +294,7 @@ impl State {
             NodeType::NoDraw,
         ];
 
-        let node_shapes = vec![
+        let mut node_shapes = vec![
             NodeShape::Circle { r: 1.0 },
             NodeShape::Circle { r: 1.0 },
             NodeShape::Circle { r: 1.0 },
@@ -334,6 +338,13 @@ impl State {
             [2, 23, 5],
             [5, 23, 2],
         ];
+
+        for i in 0..10000 {
+            positions.push([0.0, 0.1 * i as f32]);
+            labels.push(format!("{}", i));
+            node_types.push(NodeType::Class);
+            node_shapes.push(NodeShape::Circle { r: 1.0 });
+        }
 
         let cardinalities: Vec<(u32, (String, Option<String>))> = vec![
             (0, ("∀".to_string(), None)),
@@ -741,10 +752,11 @@ impl State {
             node_shapes,
             cardinalities,
             characteristics,
-            frame_count: 0,
             simulator,
             paused: false,
             reader_id,
+            last_fps_time: Instant::now(),
+            fps_counter: 0,
             cursor_position: None,
             node_dragged: false,
             pan_active: false,
@@ -1049,6 +1061,19 @@ impl State {
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         self.window.request_redraw();
+
+        self.fps_counter += 1;
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last_fps_time);
+
+        if elapsed.as_secs_f32() >= 1.0 {
+            let fps = self.fps_counter as f32 / elapsed.as_secs_f32();
+            info!("FPS: {:.2}", fps);
+
+            // Reset counters
+            self.last_fps_time = now;
+            self.fps_counter = 0;
+        }
 
         if !self.is_surface_configured {
             return Ok(());
