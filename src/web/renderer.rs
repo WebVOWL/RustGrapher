@@ -387,12 +387,12 @@ impl State {
                 .fold(0.0, f32::max);
 
             temp_buffer.shape_until_scroll(&mut font_system, false);
-            let mut capped_width = 45.0;
+            let mut capped_width = 44.0 * scale;
             let mut max_lines = 0;
             match node_shapes.get_mut(i) {
                 Some(NodeShape::Rectangle { w, .. }) => {
                     let new_width_pixels = text_width;
-                    *w = f32::min(new_width_pixels / (capped_width * 2.0), 2.0);
+                    *w = f32::min(new_width_pixels / (capped_width * 2.0) * 1.05, 2.0);
                     if matches!(node_types[i], NodeType::InverseProperty) {
                         continue;
                     }
@@ -406,7 +406,7 @@ impl State {
                     | NodeType::Union
                     | NodeType::Intersection => {
                         max_lines = 1;
-                        capped_width = 80.0;
+                        capped_width = 79.0 * scale;
                     }
                     _ => {
                         max_lines = 2;
