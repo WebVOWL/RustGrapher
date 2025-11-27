@@ -339,11 +339,16 @@ impl State {
             [5, 23, 2],
         ];
 
-        for i in 0..10000 {
+        for i in 0..5000 {
             positions.push([0.0, 0.1 * i as f32]);
             labels.push(format!("{}", i));
             node_types.push(NodeType::Class);
             node_shapes.push(NodeShape::Circle { r: 1.0 });
+        }
+
+        let mut edges: [[usize; 3]; 5000] = [[42; 3]; 5000];
+        for i in 0..5000 {
+            edges[i] = [i + 2, i % 500, i];
         }
 
         let cardinalities: Vec<(u32, (String, Option<String>))> = vec![

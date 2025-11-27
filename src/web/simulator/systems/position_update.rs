@@ -4,6 +4,7 @@ use crate::web::simulator::{
         CursorPosition, Damping, DeltaTime, FreezeThreshold, PointIntersection, WorldSize,
     },
 };
+use glam::Vec2;
 use log::info;
 use rayon::prelude::*;
 use specs::prelude::*;
@@ -61,6 +62,10 @@ impl<'a> System<'a> for UpdateNodePosition {
                 velocity.0 *= damping.0;
 
                 pos.0 += velocity.0 * delta_time.0;
+
+                if pos.0.distance(Vec2::new(0.0, 0.0)) > 10_000_000.0 {
+                    pos.0 = Vec2::new(0.0, 0.0);
+                }
 
                 // info!(
                 //     "freeze_threshold.0, {0} > velocity.0.abs().length(), {1}",
