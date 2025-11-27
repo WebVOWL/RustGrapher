@@ -387,12 +387,12 @@ impl State {
                 .fold(0.0, f32::max);
 
             temp_buffer.shape_until_scroll(&mut font_system, false);
-            let mut capped_width = 45.0;
+            let mut capped_width = 44.0 * scale;
             let mut max_lines = 0;
             match node_shapes.get_mut(i) {
                 Some(NodeShape::Rectangle { w, .. }) => {
                     let new_width_pixels = text_width;
-                    *w = f32::min(new_width_pixels / (capped_width * 2.0), 2.0);
+                    *w = f32::min(new_width_pixels / (capped_width * 2.0) * 1.05, 2.0);
                     if matches!(node_types[i], NodeType::InverseProperty) {
                         continue;
                     }
@@ -406,7 +406,7 @@ impl State {
                     | NodeType::Union
                     | NodeType::Intersection => {
                         max_lines = 1;
-                        capped_width = 80.0;
+                        capped_width = 79.0 * scale;
                     }
                     _ => {
                         max_lines = 2;
@@ -1097,15 +1097,6 @@ impl State {
                 let scaled_label_w = label_w * self.zoom;
                 let scaled_label_h = label_h * self.zoom;
 
-                // skip text rendering for nodes outside the viewport
-                if node_x_px < -scaled_label_w * 0.4
-                    || node_x_px > vp_w_px + scaled_label_w * 0.4
-                    || node_y_px < -scaled_label_h * 0.4
-                    || node_y_px > vp_h_px + scaled_label_h * 0.4
-                {
-                    continue;
-                }
-
                 // center horizontally on node
                 let left = node_x_px - scaled_label_w * 0.5;
 
@@ -1113,8 +1104,16 @@ impl State {
                 // top = distance from top in physical pixels
                 let top = match self.node_types[i] {
                     NodeType::EquivalentClass => node_y_px - 2.0 * line_height * self.zoom,
-                    _ => node_y_px - line_height * self.zoom,
+                    _ => node_y_px - (line_height * scale) * self.zoom,
                 };
+
+                let right = left + scaled_label_w;
+                let bottom = top + scaled_label_h;
+
+                // Skip text rendering for nodes outside the viewport
+                if right < 0.0 || left > vp_w_px || bottom < 0.0 || top > vp_h_px {
+                    continue;
+                }
 
                 areas.push(TextArea {
                     buffer: buf,
@@ -1216,17 +1215,17 @@ impl State {
                 let scaled_label_w = label_w * self.zoom;
                 let scaled_label_h = label_h * self.zoom;
 
+                let left = card_x_px - scaled_label_w * 0.5;
+                let top = card_y_px - scaled_label_h * 0.5;
+
+                let right = left + scaled_label_w;
+                let bottom = top + scaled_label_h;
+
                 // skip text rendering for cardinalities outside the viewport
-                if card_x_px < -scaled_label_w * 0.4
-                    || card_x_px > vp_w_px + scaled_label_w * 0.4
-                    || card_y_px < -scaled_label_h * 0.4
-                    || card_y_px > vp_h_px + scaled_label_h * 0.4
-                {
+                if right < 0.0 || left > vp_w_px || bottom < 0.0 || top > vp_h_px {
                     continue;
                 }
 
-                let left = card_x_px - scaled_label_w * 0.5;
-                let top = card_y_px - scaled_label_h * 0.5;
                 areas.push(TextArea {
                     buffer: buf,
                     left,
