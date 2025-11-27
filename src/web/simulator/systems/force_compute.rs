@@ -4,7 +4,7 @@ use crate::web::{
         components::{
             edges::Connects,
             forces::NodeForces,
-            nodes::{Dragged, Fixed, Mass, Position, Velocity},
+            nodes::{Mass, NodeState, Position, Velocity},
         },
         ressources::simulator_vars::{
             DeltaTime, GravityForce, QuadTreeTheta, RepelForce, SpringNeutralLength,
@@ -43,8 +43,7 @@ impl<'a> System<'a> for ComputeNodeForce {
         Entities<'a>,
         ReadStorage<'a, Position>,
         ReadStorage<'a, Mass>,
-        ReadStorage<'a, Fixed>,
-        ReadStorage<'a, Dragged>,
+        ReadStorage<'a, NodeState>,
         WriteStorage<'a, NodeForces>,
         ReadExpect<'a, QuadTree>,
         Read<'a, QuadTreeTheta>,
@@ -53,31 +52,26 @@ impl<'a> System<'a> for ComputeNodeForce {
 
     fn run(
         &mut self,
-        (
-            entities,
-            positions,
-            masses,
-            fixed,
-            dragged,
-            mut node_forces,
-            quadtree,
-            theta,
-            repel_force,
-        ): Self::SystemData,
+        (entities, positions, masses, node_states, mut node_forces, quadtree, theta, repel_force): Self::SystemData,
     ) {
         (
             &*entities,
             &positions,
             &masses,
             &mut node_forces,
-            !&fixed,
-            !&dragged,
+            &node_states,
         )
             .par_join()
-            .for_each(|(entity, pos, mass, node_forces, _, _)| {
+            .for_each(|(entity, pos, mass, node_forces, state)| {
+                if state.is_static() {
+                    node_forces.0 = Vec2::ZERO;
+                    return;
+                }
+
                 let node_approximations = quadtree.stack(&pos.0, theta.0);
 
                 node_forces.0 = Vec2::ZERO;
+
                 for node_approximation in node_approximations {
                     node_forces.0 += Self::repel_force(
                         pos.0,
@@ -110,26 +104,22 @@ impl<'a> System<'a> for ComputeGravityForce {
         Entities<'a>,
         ReadStorage<'a, Position>,
         ReadStorage<'a, Mass>,
-        ReadStorage<'a, Fixed>,
-        ReadStorage<'a, Dragged>,
+        ReadStorage<'a, NodeState>,
         WriteStorage<'a, NodeForces>,
         Read<'a, GravityForce>,
         Read<'a, WorldSize>,
     );
     fn run(
         &mut self,
-        (entities, positions, masses, fixed, dragged, mut forces, gravity_force, world_size): Self::SystemData,
+        (entities, positions, masses, node_states, mut forces, gravity_force, world_size): Self::SystemData,
     ) {
-        (
-            &entities,
-            &positions,
-            &masses,
-            &mut forces,
-            !&fixed,
-            !&dragged,
-        )
+        (&entities, &positions, &masses, &mut forces, &node_states)
             .par_join()
-            .for_each(|(entity, pos, mass, force, _, _)| {
+            .for_each(|(entity, pos, mass, force, state)| {
+                if state.is_static() {
+                    return;
+                }
+
                 force.0 += -pos.0 * mass.0 * gravity_force.0;
                 // info!(
                 //     "(CGF) [{0}] f: {1} | p: {2} | m: {3} | g: {4} | np: {5}",
@@ -150,8 +140,7 @@ pub struct ApplyNodeForce;
 impl<'a> System<'a> for ApplyNodeForce {
     type SystemData = (
         Entities<'a>,
-        ReadStorage<'a, Fixed>,
-        ReadStorage<'a, Dragged>,
+        ReadStorage<'a, NodeState>,
         ReadStorage<'a, NodeForces>,
         WriteStorage<'a, Velocity>,
         ReadStorage<'a, Mass>,
@@ -160,18 +149,15 @@ impl<'a> System<'a> for ApplyNodeForce {
 
     fn run(
         &mut self,
-        (entities, fixed, dragged, forces, mut velocities, masses, delta_time): Self::SystemData,
+        (entities, node_states, forces, mut velocities, masses, delta_time): Self::SystemData,
     ) {
-        (
-            &entities,
-            &forces,
-            &mut velocities,
-            &masses,
-            !&fixed,
-            !&dragged,
-        )
+        (&entities, &forces, &mut velocities, &masses, &node_states)
             .par_join()
-            .for_each(|(entity, force, velocity, mass, _, _)| {
+            .for_each(|(entity, force, velocity, mass, state)| {
+                if state.is_static() {
+                    return;
+                }
+
                 velocity.0 += force.0 / mass.0 * delta_time.0;
                 // info!(
                 //     "(ANF) [{0}] v: {1} | f: {2} | m: {3} | d: {4}",
@@ -191,7 +177,7 @@ impl<'a> System<'a> for ComputeEdgeForces {
     type SystemData = (
         Entities<'a>,
         ReadStorage<'a, Connects>,
-        ReadStorage<'a, Fixed>,
+        ReadStorage<'a, NodeState>,
         WriteStorage<'a, NodeForces>,
         ReadStorage<'a, Position>,
         Read<'a, SpringStiffness>,
@@ -203,16 +189,20 @@ impl<'a> System<'a> for ComputeEdgeForces {
         (
             entities,
             connections,
-            fixed,
+            node_states,
             mut forces,
             positions,
             spring_stiffness,
             spring_neutral_length,
         ): Self::SystemData,
     ) {
-        for (entity, position, connects, _) in
-            (&*entities, &positions, &connections, !&fixed).join()
+        for (entity, position, connects, state) in
+            (&*entities, &positions, &connections, &node_states).join()
         {
+            if state.is_static() {
+                continue;
+            }
+
             let rb1 = entity;
             for rb2 in &connects.targets {
                 let direction_vec = positions.get(*rb2).unwrap().0 - position.0;
