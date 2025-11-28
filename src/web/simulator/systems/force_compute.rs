@@ -196,38 +196,49 @@ impl<'a> System<'a> for ComputeEdgeForces {
             spring_neutral_length,
         ): Self::SystemData,
     ) {
-        for (entity, position, connects, state) in
-            (&*entities, &positions, &connections, &node_states).join()
-        {
-            if state.is_static() {
-                continue;
-            }
+        let positions_storage = &positions;
 
-            let rb1 = entity;
-            for rb2 in &connects.targets {
-                let direction_vec = positions.get(*rb2).unwrap().0 - position.0;
+        let force_updates: Vec<(specs::Entity, Vec2)> =
+            (&entities, &positions, &connections, &node_states)
+                .par_join()
+                .fold(
+                    || Vec::new(),
+                    |mut acc, (entity, pos, connects, state)| {
+                        if state.is_static() {
+                            return acc;
+                        }
 
-                let force_magnitude =
-                    spring_stiffness.0 * (direction_vec.length() - spring_neutral_length.0);
+                        let rb1 = entity;
+                        for rb2 in &connects.targets {
+                            // Look up the neighbor's position
+                            if let Some(pos2_comp) = positions_storage.get(*rb2) {
+                                let pos2 = pos2_comp.0;
+                                let direction_vec = pos2 - pos.0;
 
-                let spring_force = direction_vec.normalize_or(Vec2::ZERO) * -force_magnitude;
+                                let force_magnitude = spring_stiffness.0
+                                    * (direction_vec.length() - spring_neutral_length.0);
 
-                let rb1_force = forces.get(rb1).unwrap().0;
-                let rb2_force = forces.get(*rb2).unwrap().0;
+                                let spring_force =
+                                    direction_vec.normalize_or(Vec2::ZERO) * -force_magnitude;
 
-                let _ = forces.insert(rb1, NodeForces(rb1_force.clone() - spring_force));
-                let _ = forces.insert(*rb2, NodeForces(rb2_force.clone() + spring_force));
-                // info!(
-                //     "(UEF) S[{0}] f: {1} | T[{2}] f: {3} | dv: {4} | fm: {5} | sf: {6} | st: {7}",
-                //     entity.id(),
-                //     rb1_force,
-                //     rb2.id(),
-                //     rb2_force,
-                //     direction_vec,
-                //     force_magnitude,
-                //     spring_force,
-                //     spring_stiffness.0
-                // );
+                                acc.push((rb1, -spring_force));
+                                acc.push((*rb2, spring_force));
+                            }
+                        }
+                        acc
+                    },
+                )
+                .reduce(
+                    || Vec::new(),
+                    |mut a, b| {
+                        a.extend(b);
+                        a
+                    },
+                );
+
+        for (entity, force_vec) in force_updates {
+            if let Some(force_comp) = forces.get_mut(entity) {
+                force_comp.0 += force_vec;
             }
         }
     }

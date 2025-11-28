@@ -1480,6 +1480,7 @@ impl State {
             _ => {}
         }
     }
+
     pub fn handle_mouse_key(&mut self, button: MouseButton, is_pressed: bool) {
         match (button, is_pressed) {
             (MouseButton::Left, true) => {
@@ -1525,6 +1526,7 @@ impl State {
             _ => {}
         }
     }
+
     pub fn handle_cursor(&mut self, position: PhysicalPosition<f64>) {
         // (x,y) coords in pixels relative to the top-left corner of the window
         let pos_screen = Vec2::new(position.x as f32, position.y as f32);
