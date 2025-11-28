@@ -340,6 +340,7 @@ impl State {
             [5, 23, 2],
         ];
 
+        // TODO: remove 'benchmarks'
         // for i in 0..5000 {
         //     positions.push([0.0, 0.1 * i as f32]);
         //     labels.push(format!("{}", i));
@@ -1575,8 +1576,8 @@ impl State {
         let world_pos_before = self.screen_to_world(cursor_pos_screen);
 
         // 2. Calculate new zoom
-        let zoom_sensitivity = 0.1;
-        self.zoom *= 1.0 - scroll_amount * zoom_sensitivity; // scroll up (positive y) = zoom in
+        let zoom_sensitivity = 0.05;
+        self.zoom *= 1.0 - -scroll_amount * zoom_sensitivity; // scroll down = zoom in
         self.zoom = self.zoom.clamp(0.1, 4.0); // Min/max zoom levels
 
         // 3. We want the world_pos_before to stay at cursor_pos_screen.
