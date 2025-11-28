@@ -1580,7 +1580,7 @@ impl State {
         // 2. Calculate new zoom
         let zoom_sensitivity = 0.05;
         self.zoom *= 1.0 - -scroll_amount * zoom_sensitivity; // scroll down = zoom in
-        self.zoom = self.zoom.clamp(0.1, 4.0); // Min/max zoom levels
+        self.zoom = self.zoom.clamp(0.05, 4.0); // Min/max zoom levels
 
         // 3. We want the world_pos_before to stay at cursor_pos_screen.
         //    Find the new pan that makes this true.
