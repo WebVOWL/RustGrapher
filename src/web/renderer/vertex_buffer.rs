@@ -1,7 +1,7 @@
 use web_sys::js_sys::Math::atan2;
 use wgpu::util::DeviceExt;
 
-use crate::web::renderer::{node_shape::NodeShape, node_types::NodeType};
+use crate::web::renderer::{node_shape::NodeShape, prefix_type::PrefixType};
 
 // Number of segments to divide each Bézier curve into for strip generation
 const BEZIER_SEGMENTS: usize = 24;
@@ -81,7 +81,7 @@ impl NodeInstance {
 
 pub fn build_node_instances(
     positions: &[[f32; 2]],
-    node_types: &[NodeType],
+    node_types: &[PrefixType],
     node_shapes: &[NodeShape],
 ) -> Vec<NodeInstance> {
     let mut node_instances: Vec<NodeInstance> = vec![];
@@ -103,7 +103,7 @@ pub fn build_node_instances(
 pub fn create_node_instance_buffer(
     device: &wgpu::Device,
     positions: &[[f32; 2]],
-    node_types: &[NodeType],
+    node_types: &[PrefixType],
     node_shapes: &[NodeShape],
 ) -> wgpu::Buffer {
     let node_instances = build_node_instances(positions, node_types, node_shapes);
@@ -186,7 +186,7 @@ pub fn build_line_and_arrow_vertices(
     edges: &[[usize; 3]],
     node_positions: &[[f32; 2]],
     node_shapes: &[NodeShape],
-    node_types: &[NodeType],
+    node_types: &[PrefixType],
     zoom: f32,
 ) -> (Vec<EdgeVertex>, Vec<EdgeVertex>) {
     const LINE_THICKNESS: f32 = 2.25;
@@ -206,14 +206,14 @@ pub fn build_line_and_arrow_vertices(
         let mut end = node_positions[end_idx];
 
         let line_type = match node_types[center_idx] {
-            NodeType::SubclassOf => 1,
-            NodeType::DisjointWith => 2,
-            NodeType::ValuesFrom => 3,
+            PrefixType::SubclassOf => 1,
+            PrefixType::DisjointWith => 2,
+            PrefixType::ValuesFrom => 3,
             _ => match node_types[start_idx] {
-                NodeType::Union
-                | NodeType::DisjointUnion
-                | NodeType::Complement
-                | NodeType::Intersection => 4,
+                PrefixType::Union
+                | PrefixType::DisjointUnion
+                | PrefixType::Complement
+                | PrefixType::Intersection => 4,
                 _ => 0,
             },
         };
@@ -515,7 +515,7 @@ pub fn create_edge_vertex_buffer(
     edges: &[[usize; 3]],
     node_positions: &[[f32; 2]],
     node_shapes: &[NodeShape],
-    node_types: &[NodeType],
+    node_types: &[PrefixType],
     zoom: f32,
 ) -> (wgpu::Buffer, u32, wgpu::Buffer, u32) {
     // Build separate vertex lists

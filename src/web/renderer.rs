@@ -1,11 +1,12 @@
+pub mod edge_types;
+pub mod elements;
 pub mod events;
 mod node_shape;
-pub mod node_types;
 mod vertex_buffer;
 
 use crate::web::{
     prelude::EVENT_DISPATCHER,
-    renderer::{events::RenderEvent, node_shape::NodeShape, node_types::NodeType},
+    renderer::{elements::PrefixType, events::RenderEvent, node_shape::NodeShape},
     simulator::{Simulator, components::nodes::Position, ressources::events::SimulatorEvent},
 };
 use glam::Vec2;
@@ -56,7 +57,7 @@ pub struct State {
     labels: Vec<String>,
     edges: Vec<[usize; 3]>,
     solitary_edges: Vec<[usize; 3]>,
-    node_types: Vec<NodeType>,
+    node_types: Vec<PrefixType>,
     node_shapes: Vec<NodeShape>,
     cardinalities: Vec<(u32, (String, Option<String>))>,
     characteristics: HashMap<usize, String>,
@@ -262,32 +263,32 @@ impl State {
         ];
 
         let node_types = [
-            NodeType::Class,
-            NodeType::RdfsClass,
-            NodeType::RdfsResource,
-            NodeType::ExternalClass,
-            NodeType::Thing,
-            NodeType::EquivalentClass,
-            NodeType::DeprecatedClass,
-            NodeType::AnonymousClass,
-            NodeType::Literal,
-            NodeType::Complement,
-            NodeType::DisjointUnion,
-            NodeType::Intersection,
-            NodeType::Union,
-            NodeType::Datatype,
-            NodeType::ValuesFrom,
-            NodeType::DatatypeProperty,
-            NodeType::DatatypeProperty,
-            NodeType::SubclassOf,
-            NodeType::DisjointWith,
-            NodeType::RdfProperty,
-            NodeType::DeprecatedProperty,
-            NodeType::ExternalProperty,
-            NodeType::ObjectProperty,
-            NodeType::InverseProperty,
-            NodeType::NoDraw,
-            NodeType::NoDraw,
+            PrefixType::Class,
+            PrefixType::RdfsClass,
+            PrefixType::RdfsResource,
+            PrefixType::ExternalClass,
+            PrefixType::Thing,
+            PrefixType::EquivalentClass,
+            PrefixType::DeprecatedClass,
+            PrefixType::AnonymousClass,
+            PrefixType::Literal,
+            PrefixType::Complement,
+            PrefixType::DisjointUnion,
+            PrefixType::Intersection,
+            PrefixType::Union,
+            PrefixType::Datatype,
+            PrefixType::ValuesFrom,
+            PrefixType::DatatypeProperty,
+            PrefixType::DatatypeProperty,
+            PrefixType::SubclassOf,
+            PrefixType::DisjointWith,
+            PrefixType::RdfProperty,
+            PrefixType::DeprecatedProperty,
+            PrefixType::ExternalProperty,
+            PrefixType::ObjectProperty,
+            PrefixType::InverseProperty,
+            PrefixType::NoDraw,
+            PrefixType::NoDraw,
         ];
 
         let node_shapes = vec![
@@ -359,7 +360,7 @@ impl State {
         // iterate over labels and update the width of corresponding rectangle nodes
         for (i, label_text) in labels.clone().iter().enumerate() {
             // Set fixed size for disjoint property
-            if let Some(NodeType::DisjointWith) = node_types.get(i) {
+            if let Some(PrefixType::DisjointWith) = node_types.get(i) {
                 node_shapes[i] = NodeShape::Rectangle { w: 0.75, h: 0.75 };
                 continue;
             }
@@ -393,18 +394,18 @@ impl State {
                 Some(NodeShape::Rectangle { w, .. }) => {
                     let new_width_pixels = text_width;
                     *w = f32::min(new_width_pixels / (capped_width * 2.0) * 1.05, 2.0);
-                    if matches!(node_types[i], NodeType::InverseProperty) {
+                    if matches!(node_types[i], PrefixType::InverseProperty) {
                         continue;
                     }
                     max_lines = 1;
                     capped_width *= 4.0;
                 }
                 Some(NodeShape::Circle { r }) => match node_types[i] {
-                    NodeType::EquivalentClass => continue,
-                    NodeType::Complement
-                    | NodeType::DisjointUnion
-                    | NodeType::Union
-                    | NodeType::Intersection => {
+                    PrefixType::EquivalentClass => continue,
+                    PrefixType::Complement
+                    | PrefixType::DisjointUnion
+                    | PrefixType::Union
+                    | PrefixType::Intersection => {
                         max_lines = 1;
                         capped_width = 79.0 * scale;
                     }
@@ -664,7 +665,7 @@ impl State {
                 .unwrap()
                 .len();
             if num_neighbors < 2
-                || (matches!(node_types[center], NodeType::InverseProperty) && num_neighbors <= 2)
+                || (matches!(node_types[center], PrefixType::InverseProperty) && num_neighbors <= 2)
             {
                 solitary_edges.push([start, center, end]);
             }
@@ -829,7 +830,7 @@ impl State {
                 NodeShape::Rectangle { w, .. } => {
                     // Calculate physical pixel width from shape's width multiplier
                     let mut height = match self.node_types[i] {
-                        NodeType::InverseProperty => 48.0,
+                        PrefixType::InverseProperty => 48.0,
                         _ => 12.0,
                     };
                     if self.characteristics.contains_key(&i) {
@@ -839,24 +840,24 @@ impl State {
                 }
                 NodeShape::Circle { r } => {
                     let mut height = match self.node_types[i] {
-                        NodeType::ExternalClass
-                        | NodeType::DeprecatedClass
-                        | NodeType::EquivalentClass
-                        | NodeType::DisjointWith
-                        | NodeType::Union
-                        | NodeType::DisjointUnion
-                        | NodeType::Complement
-                        | NodeType::Intersection => 36.0,
+                        PrefixType::ExternalClass
+                        | PrefixType::DeprecatedClass
+                        | PrefixType::EquivalentClass
+                        | PrefixType::DisjointWith
+                        | PrefixType::Union
+                        | PrefixType::DisjointUnion
+                        | PrefixType::Complement
+                        | PrefixType::Intersection => 36.0,
                         _ => 24.0,
                     };
                     if self.characteristics.contains_key(&i) {
                         height += 24.0;
                     };
                     let width = match self.node_types[i] {
-                        NodeType::Union
-                        | NodeType::DisjointUnion
-                        | NodeType::Complement
-                        | NodeType::Intersection => 75.0,
+                        PrefixType::Union
+                        | PrefixType::DisjointUnion
+                        | PrefixType::Complement
+                        | PrefixType::Intersection => 75.0,
                         _ => 85.0,
                     };
                     (width * scale * r, height * scale)
@@ -869,7 +870,7 @@ impl State {
             let node_type_metrics = Metrics::new(font_px - 3.0, line_px);
             let mut owned_spans: Vec<(String, Attrs)> = Vec::new();
             match self.node_types[i] {
-                NodeType::EquivalentClass => {
+                PrefixType::EquivalentClass => {
                     // TODO: Update when handling equivalent classes from ontology
                     let mut parts: Vec<&str> = label.split('\n').collect();
                     let label1 = parts.get(0).map_or("", |v| *v).to_string();
@@ -888,7 +889,7 @@ impl State {
                         owned_spans.push((label1, attrs.clone()));
                     }
                 }
-                NodeType::InverseProperty => {
+                PrefixType::InverseProperty => {
                     if let Some(chs) = self.characteristics.get(&i) {
                         let (ch1, ch2) = chs.split_once("\n").unwrap_or((chs, ""));
                         let labels_vec: Vec<&str> = label.split('\n').collect();
@@ -913,47 +914,47 @@ impl State {
                         owned_spans.push((label2, attrs.clone()));
                     }
                 }
-                NodeType::ExternalClass => {
+                PrefixType::ExternalClass => {
                     owned_spans.push((label.to_string(), attrs.clone()));
                     owned_spans.push((
                         "\n(external)".to_string(),
                         attrs.clone().metrics(node_type_metrics),
                     ));
                 }
-                NodeType::DeprecatedClass => {
+                PrefixType::DeprecatedClass => {
                     owned_spans.push((label.to_string(), attrs.clone()));
                     owned_spans.push((
                         "\n(deprecated)".to_string(),
                         attrs.clone().metrics(node_type_metrics),
                     ));
                 }
-                NodeType::DisjointWith => {
+                PrefixType::DisjointWith => {
                     owned_spans.push((label.to_string(), attrs.clone()));
                     owned_spans.push((
                         "\n\n(disjoint)".to_string(),
                         attrs.clone().metrics(node_type_metrics),
                     ));
                 }
-                NodeType::Thing => {
+                PrefixType::Thing => {
                     owned_spans.push(("Thing".to_string(), attrs.clone()));
                 }
-                NodeType::Complement => {
+                PrefixType::Complement => {
                     owned_spans.push((label.to_string(), attrs.clone()));
                     owned_spans.push(("\n\n¬".to_string(), attrs.clone()));
                 }
-                NodeType::DisjointUnion => {
+                PrefixType::DisjointUnion => {
                     owned_spans.push((label.to_string(), attrs.clone()));
                     owned_spans.push(("\n\n1".to_string(), attrs.clone()));
                 }
-                NodeType::Intersection => {
+                PrefixType::Intersection => {
                     owned_spans.push((label.to_string(), attrs.clone()));
                     owned_spans.push(("\n\n∩".to_string(), attrs.clone()));
                 }
-                NodeType::Union => {
+                PrefixType::Union => {
                     owned_spans.push((label.to_string(), attrs.clone()));
                     owned_spans.push(("\n\n∪".to_string(), attrs.clone()));
                 }
-                NodeType::SubclassOf => {
+                PrefixType::SubclassOf => {
                     owned_spans.push(("Subclass of".to_string(), attrs.clone()));
                 }
                 _ => {
@@ -962,7 +963,7 @@ impl State {
             }
 
             // Append characteristic as a small parenthesized suffix if present.
-            if !matches!(self.node_types[i], NodeType::InverseProperty) {
+            if !matches!(self.node_types[i], PrefixType::InverseProperty) {
                 if let Some(ch) = self.characteristics.get(&i) {
                     owned_spans.push((
                         format!("\n({})", ch),
@@ -1064,15 +1065,15 @@ impl State {
             for (i, buf) in text_buffers.iter().enumerate() {
                 // node logical coords
                 let node_logical = match self.node_types[i] {
-                    NodeType::InverseProperty => {
+                    PrefixType::InverseProperty => {
                         let position_x = self.positions[i][0];
                         let position_y = self.positions[i][1] + 18.0;
                         Vec2::new(position_x, position_y)
                     }
-                    NodeType::Complement
-                    | NodeType::DisjointUnion
-                    | NodeType::Union
-                    | NodeType::Intersection => {
+                    PrefixType::Complement
+                    | PrefixType::DisjointUnion
+                    | PrefixType::Union
+                    | PrefixType::Intersection => {
                         let position_x = self.positions[i][0];
                         let position_y = self.positions[i][1] + 24.0;
                         Vec2::new(position_x, position_y)
@@ -1103,7 +1104,7 @@ impl State {
                 let line_height = 8.0; // Base physical pixels
                 // top = distance from top in physical pixels
                 let top = match self.node_types[i] {
-                    NodeType::EquivalentClass => node_y_px - 2.0 * line_height * self.zoom,
+                    PrefixType::EquivalentClass => node_y_px - 2.0 * line_height * self.zoom,
                     _ => node_y_px - (line_height * scale) * self.zoom,
                 };
 

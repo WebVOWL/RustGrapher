@@ -1,8 +1,12 @@
-use strum::IntoEnumIterator;
-use strum_macros::EnumIter;
+// TODO: Expand with OWL 2
 
-#[derive(Copy, Clone, Debug, EnumIter, PartialEq, Eq, Hash)]
-pub enum NodeType {
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum OwlType {
+    Node(OwlNode),
+    Edge(OwlEdge),
+}
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum OwlNode {
     Class,
     ExternalClass,
     Thing,
@@ -13,20 +17,14 @@ pub enum NodeType {
     Complement,
     DeprecatedClass,
     AnonymousClass,
-    Literal,
-    RdfsClass,
-    RdfsResource,
+}
 
-    // Properties
-    Datatype,
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum OwlEdge {
     ObjectProperty,
     DatatypeProperty,
-    SubclassOf,
     InverseProperty,
     DisjointWith,
-    RdfProperty,
     DeprecatedProperty,
     ExternalProperty,
-    ValuesFrom,
-    NoDraw,
 }
