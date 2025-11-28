@@ -4,6 +4,7 @@ use crate::web::simulator::{
         CursorPosition, Damping, DeltaTime, FreezeThreshold, PointIntersection, WorldSize,
     },
 };
+
 use glam::Vec2;
 use log::info;
 use rayon::prelude::*;
