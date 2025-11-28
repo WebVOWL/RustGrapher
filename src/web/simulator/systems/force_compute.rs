@@ -204,10 +204,6 @@ impl<'a> System<'a> for ComputeEdgeForces {
                 .fold(
                     || Vec::new(),
                     |mut acc, (entity, pos, connects, state)| {
-                        if state.is_static() {
-                            return acc;
-                        }
-
                         let rb1 = entity;
                         for rb2 in &connects.targets {
                             // Look up the neighbor's position
