@@ -5,6 +5,7 @@ mod vertex_buffer;
 
 use crate::web::{
     prelude::EVENT_DISPATCHER,
+    quadtree::QuadTree,
     renderer::{events::RenderEvent, node_shape::NodeShape, node_types::NodeType},
     simulator::{Simulator, components::nodes::Position, ressources::events::SimulatorEvent},
 };
@@ -339,17 +340,17 @@ impl State {
             [5, 23, 2],
         ];
 
-        for i in 0..5000 {
-            positions.push([0.0, 0.1 * i as f32]);
-            labels.push(format!("{}", i));
-            node_types.push(NodeType::Class);
-            node_shapes.push(NodeShape::Circle { r: 1.0 });
-        }
+        // for i in 0..5000 {
+        //     positions.push([0.0, 0.1 * i as f32]);
+        //     labels.push(format!("{}", i));
+        //     node_types.push(NodeType::Class);
+        //     node_shapes.push(NodeShape::Circle { r: 1.0 });
+        // }
 
-        let mut edges: [[usize; 3]; 5000] = [[42; 3]; 5000];
-        for i in 0..5000 {
-            edges[i] = [i + 2, i % 500, i];
-        }
+        // let mut edges: [[usize; 3]; 5000] = [[42; 3]; 5000];
+        // for i in 0..5000 {
+        //     edges[i] = [i + 2, i % 500, i];
+        // }
 
         let cardinalities: Vec<(u32, (String, Option<String>))> = vec![
             (0, ("∀".to_string(), None)),
@@ -1463,6 +1464,7 @@ impl State {
                     let delta = MouseScrollDelta::PixelDelta(PhysicalPosition { x: 0.0, y: *zoom });
                     self.handle_scroll(delta);
                 }
+                RenderEvent::CenterGraph => self.center_graph(),
             }
         }
     }
@@ -1589,5 +1591,39 @@ impl State {
         let world_rel_zoomed = Vec2::new(screen_offset.x, -screen_offset.y);
 
         self.pan = world_pos_before - (world_rel_zoomed / self.zoom);
+    }
+
+    fn center_graph(&mut self) {
+        // Fetch boundary from QuadTree
+        let (center, width, height) = {
+            let quadtree = self.simulator.world.read_resource::<QuadTree>();
+            (
+                quadtree.boundary.center,
+                quadtree.boundary.width,
+                quadtree.boundary.height,
+            )
+        };
+
+        // Prevent division by zero
+        if width <= 0.1 || height <= 0.1 {
+            return;
+        }
+
+        // Calculate Scale
+        let padding_factor = 0.90;
+        let screen_width = self.config.width as f32;
+        let screen_height = self.config.height as f32;
+
+        let zoom_x = screen_width / width;
+        let zoom_y = screen_height / height;
+
+        let new_zoom = zoom_x.min(zoom_y) * padding_factor;
+
+        self.zoom = new_zoom;
+
+        // Calculate Pan
+        self.pan = center;
+
+        self.window.request_redraw();
     }
 }
