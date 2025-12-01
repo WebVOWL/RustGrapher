@@ -64,6 +64,7 @@ pub struct State {
     characteristics: HashMap<usize, String>,
     simulator: Simulator<'static, 'static>,
     paused: bool,
+    hovered_index: i32,
 
     // User input
     cursor_position: Option<Vec2>,
@@ -207,6 +208,8 @@ impl State {
             contents: bytemuck::cast_slice(&[view_uniforms]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+
+        let hovered_index = -1;
 
         // TODO: remove test code after implementing ontology loading
         let mut positions = vec![
@@ -487,6 +490,7 @@ impl State {
             &positions,
             &node_types,
             &node_shapes,
+            &hovered_index,
         );
         let num_instances = positions.len() as u32;
 
@@ -761,6 +765,7 @@ impl State {
             characteristics,
             simulator,
             paused: false,
+            hovered_index,
             reader_id,
             last_fps_time: Instant::now(),
             fps_counter: 0,
@@ -1417,10 +1422,13 @@ impl State {
             self.positions[*center] = [center_x, center_y];
         }
 
+        self.hovered_index = self.update_hover();
+
         let node_instances = vertex_buffer::build_node_instances(
             &self.positions,
             &self.node_types,
             &self.node_shapes,
+            &self.hovered_index,
         );
 
         // Build separate line and arrow vertices and write to their respective buffers
@@ -1628,5 +1636,54 @@ impl State {
         self.pan = center;
 
         self.window.request_redraw();
+    }
+
+    /// Update hovered node
+    fn update_hover(&self) -> i32 {
+        let cursor_pos = match self.cursor_position {
+            Some(pos) => pos,
+            None => return -1,
+        };
+
+        // Convert screen pixel coordinates to world coordinates
+        let world_pos = self.screen_to_world(cursor_pos);
+
+        const BASE_RADIUS: f32 = 50.0;
+        const BASE_WIDTH: f32 = 85.0;
+        const BASE_HEIGHT: f32 = 50.0;
+
+        let mut found_index = -1;
+
+        // Iterate backwards to prioritize nodes drawn "on top"
+        for (i, pos_array) in self.positions.iter().enumerate().rev() {
+            // Skip nodes that aren't drawn
+            if matches!(self.node_types[i], NodeType::NoDraw) {
+                continue;
+            }
+
+            let pos = Vec2::new(pos_array[0], pos_array[1]);
+            let delta = world_pos - pos;
+
+            let is_hovered = match self.node_shapes[i] {
+                NodeShape::Circle { r } => {
+                    // Check distance against scaled radius
+                    delta.length_squared() <= (BASE_RADIUS * r).powi(2)
+                }
+                NodeShape::Rectangle { w, h } => {
+                    // Check Axis-Aligned Bounding Box (AABB)
+                    let half_w = (BASE_WIDTH * w) / 2.0;
+                    let half_h = (BASE_HEIGHT * h) / 2.0;
+
+                    delta.x.abs() <= half_w && delta.y.abs() <= half_h
+                }
+            };
+
+            if is_hovered {
+                found_index = i as i32;
+                break;
+            }
+        }
+
+        found_index
     }
 }

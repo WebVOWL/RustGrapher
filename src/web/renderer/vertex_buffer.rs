@@ -63,11 +63,11 @@ pub struct NodeInstance {
     pub node_type: u32,
     pub shape_type: u32,
     pub shape_dim: [f32; 2],
+    pub hovered: u32,
 }
 
 impl NodeInstance {
-    const ATTRIBS: [wgpu::VertexAttribute; 4] =
-        wgpu::vertex_attr_array![1 => Float32x2, 2 => Uint32, 3 => Uint32, 4 => Float32x2];
+    const ATTRIBS: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![1 => Float32x2, 2 => Uint32, 3 => Uint32, 4 => Float32x2, 5 => Uint32];
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         use std::mem;
@@ -83,6 +83,7 @@ pub fn build_node_instances(
     positions: &[[f32; 2]],
     node_types: &[NodeType],
     node_shapes: &[NodeShape],
+    hovered_index: &i32,
 ) -> Vec<NodeInstance> {
     let mut node_instances: Vec<NodeInstance> = vec![];
     for (i, pos) in positions.iter().enumerate() {
@@ -90,11 +91,13 @@ pub fn build_node_instances(
             NodeShape::Circle { r } => (0, [r, 0.0]),
             NodeShape::Rectangle { w, h } => (1, [w, h]),
         };
+        let hovered = if i as i32 == *hovered_index { 1 } else { 0 };
         node_instances.push(NodeInstance {
             position: *pos,
             node_type: node_types[i] as u32,
             shape_type,
             shape_dim,
+            hovered,
         });
     }
     node_instances
@@ -105,8 +108,9 @@ pub fn create_node_instance_buffer(
     positions: &[[f32; 2]],
     node_types: &[NodeType],
     node_shapes: &[NodeShape],
+    hovered_index: &i32,
 ) -> wgpu::Buffer {
-    let node_instances = build_node_instances(positions, node_types, node_shapes);
+    let node_instances = build_node_instances(positions, node_types, node_shapes, hovered_index);
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("instance_node_buffer"),
         contents: bytemuck::cast_slice(&node_instances),
