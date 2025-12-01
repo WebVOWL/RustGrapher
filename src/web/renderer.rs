@@ -1362,15 +1362,29 @@ impl State {
             render_pass.set_bind_group(0, &self.bind_group0, &[]);
             render_pass.draw(0..self.num_arrow_vertices, 0..1);
 
-            // Draw nodes
+            // Draw all nodes except hovered
             render_pass.set_pipeline(&self.render_pipeline);
-            // set vertex buffers: slot 0 = quad vertices, slot 1 = per-instance positions
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.node_instance_buffer.slice(..));
-            // bind group 0 contains resolution uniform
             render_pass.set_bind_group(0, &self.bind_group0, &[]);
-            // draw one quad per node position (instances)
-            render_pass.draw(0..self.num_vertices, 0..self.num_instances);
+
+            if self.hovered_index >= 0 {
+                // Draw 0..hovered_index
+                render_pass.draw(0..self.num_vertices, 0..self.hovered_index as u32);
+                // Draw (hovered_index+1)..num_instances
+                render_pass.draw(
+                    0..self.num_vertices,
+                    (self.hovered_index as u32 + 1)..self.num_instances,
+                );
+                // Draw hovered node last (on top)
+                render_pass.draw(
+                    0..self.num_vertices,
+                    self.hovered_index as u32..(self.hovered_index as u32 + 1),
+                );
+            } else {
+                // No hover, draw all normally
+                render_pass.draw(0..self.num_vertices, 0..self.num_instances);
+            }
 
             // Render glyphon text on top of nodes if initialized
             if let (Some(atlas), Some(viewport), Some(text_renderer)) = (
@@ -1644,6 +1658,10 @@ impl State {
             Some(pos) => pos,
             None => return -1,
         };
+
+        if self.node_dragged {
+            return self.hovered_index;
+        }
 
         // Convert screen pixel coordinates to world coordinates
         let world_pos = self.screen_to_world(cursor_pos);
