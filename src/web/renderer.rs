@@ -327,7 +327,7 @@ impl State {
             NodeShape::Rectangle { w: 1.0, h: 1.0 },
         ];
 
-        let edges = [
+        let mut edges = vec![
             [0, 14, 1],
             [13, 15, 8],
             [8, 16, 13],
@@ -657,38 +657,38 @@ impl State {
 
         // Exclude properties without neighbors from simulator
         let mut neighbor_map: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
-        for [start, center, end] in edges {
-            let mut neighbors = neighbor_map.get(&(start, end));
+        for [start, center, end] in &edges {
+            let mut neighbors = neighbor_map.get(&(*start, *end));
             if neighbors.is_none() {
-                neighbors = neighbor_map.get(&(end, start));
+                neighbors = neighbor_map.get(&(*end, *start));
             };
             match neighbors {
                 Some(cur_neighbors) => {
                     let mut new_neighbors = cur_neighbors.clone();
-                    new_neighbors.push(center);
+                    new_neighbors.push(*center);
                     neighbor_map.insert(
-                        (usize::min(start, end), usize::max(start, end)),
+                        (usize::min(*start, *end), usize::max(*start, *end)),
                         new_neighbors,
                     );
                 }
                 None => {
                     neighbor_map.insert(
-                        (usize::min(start, end), usize::max(start, end)),
-                        vec![center],
+                        (usize::min(*start, *end), usize::max(*start, *end)),
+                        vec![*center],
                     );
                 }
             }
         }
         let mut solitary_edges: Vec<[usize; 3]> = vec![];
-        for [start, center, end] in edges {
+        for [start, center, end] in &edges {
             let num_neighbors = neighbor_map
-                .get(&(usize::min(start, end), usize::max(start, end)))
+                .get(&(usize::min(*start, *end), usize::max(*start, *end)))
                 .unwrap()
                 .len();
             if num_neighbors < 2
-                || (matches!(node_types[center], NodeType::InverseProperty) && num_neighbors <= 2)
+                || (matches!(node_types[*center], NodeType::InverseProperty) && num_neighbors <= 2)
             {
-                solitary_edges.push([start, center, end]);
+                solitary_edges.push([*start, *center, *end]);
             }
         }
 
@@ -698,9 +698,9 @@ impl State {
         }
 
         let mut sim_edges = Vec::with_capacity(edges.len());
-        for [start, center, end] in edges {
-            sim_edges.push([start as u32, center as u32]);
-            sim_edges.push([center as u32, end as u32]);
+        for [start, center, end] in &edges {
+            sim_edges.push([*start as u32, *center as u32]);
+            sim_edges.push([*center as u32, *end as u32]);
         }
 
         let mut sim_sizes = Vec::with_capacity(positions.len());
