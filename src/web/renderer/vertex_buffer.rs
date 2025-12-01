@@ -132,10 +132,11 @@ pub struct EdgeVertex {
     pub curve_end: [f32; 2],      // Curve end point (for arrow calculation)
     pub tangent_at_end: [f32; 2], // Tangent direction at t=1
     pub ctrl: [f32; 2],           // Control point for quadratic Bezier
+    pub hovered: u32,
 }
 
 impl EdgeVertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
+    const ATTRIBS: [wgpu::VertexAttribute; 11] = wgpu::vertex_attr_array![
         0 => Float32x2,  // position
         1 => Float32,    // t_param
         2 => Sint32,     // side
@@ -146,6 +147,7 @@ impl EdgeVertex {
         7 => Float32x2,  // curve_end
         8 => Float32x2,  // tangent_at_end
         9 => Float32x2,  // ctrl
+        10 => Uint32,    // hover
     ];
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
@@ -192,6 +194,7 @@ pub fn build_line_and_arrow_vertices(
     node_shapes: &[NodeShape],
     node_types: &[NodeType],
     zoom: f32,
+    hovered_index: &i32,
 ) -> (Vec<EdgeVertex>, Vec<EdgeVertex>) {
     const LINE_THICKNESS: f32 = 2.25;
     const ARROW_LENGTH_PX: f32 = 10.0;
@@ -337,6 +340,12 @@ pub fn build_line_and_arrow_vertices(
             };
         }
 
+        let hovered = if center_idx as i32 == *hovered_index {
+            1
+        } else {
+            0
+        };
+
         // Compute control point for quadratic Bézier
         let ctrl = [
             (4.0 * center[0] - start[0] - end[0]) * 0.5,
@@ -386,6 +395,7 @@ pub fn build_line_and_arrow_vertices(
                     curve_end: end,
                     tangent_at_end,
                     ctrl,
+                    hovered,
                 });
             }
 
@@ -400,6 +410,7 @@ pub fn build_line_and_arrow_vertices(
                 curve_end: end,
                 tangent_at_end,
                 ctrl,
+                hovered,
             });
             line_vertices.push(EdgeVertex {
                 position: right,
@@ -412,6 +423,7 @@ pub fn build_line_and_arrow_vertices(
                 curve_end: end,
                 tangent_at_end,
                 ctrl,
+                hovered,
             });
         }
 
@@ -460,6 +472,7 @@ pub fn build_line_and_arrow_vertices(
                 curve_end: end,
                 tangent_at_end,
                 ctrl,
+                hovered,
             };
 
             // Triangle 1: tip, left, right
@@ -503,6 +516,7 @@ pub fn build_line_and_arrow_vertices(
                 curve_end: end,
                 tangent_at_end,
                 ctrl,
+                hovered,
             };
 
             arrow_vertices.push(common(tip_padded));
@@ -521,10 +535,17 @@ pub fn create_edge_vertex_buffer(
     node_shapes: &[NodeShape],
     node_types: &[NodeType],
     zoom: f32,
+    hovered_index: &i32,
 ) -> (wgpu::Buffer, u32, wgpu::Buffer, u32) {
     // Build separate vertex lists
-    let (line_vertices, arrow_vertices) =
-        build_line_and_arrow_vertices(edges, node_positions, node_shapes, node_types, zoom);
+    let (line_vertices, arrow_vertices) = build_line_and_arrow_vertices(
+        edges,
+        node_positions,
+        node_shapes,
+        node_types,
+        zoom,
+        hovered_index,
+    );
 
     let line_count = line_vertices.len() as u32;
     let arrow_count = arrow_vertices.len() as u32;

@@ -9,6 +9,7 @@ struct VertIn {
     @location(7) curve_end: vec2<f32>,       // End of curve
     @location(8) tangent_at_end: vec2<f32>,  // Tangent at t=1
     @location(9) ctrl: vec2<f32>,            // Control point for quadratic Bezier
+    @location(10) hovered: u32,
 };
 
 struct VertOut {
@@ -23,6 +24,7 @@ struct VertOut {
     @location(7) v_tangent_at_end: vec2<f32>,
     @location(8) v_position_px: vec2<f32>,   // Position in pixel space
     @location(9) v_ctrl: vec2<f32>,          // Control point for quadratic Bezier
+    @interpolate(flat) @location(10) v_hovered: u32,
 };
 
 struct ViewUniforms {
@@ -74,6 +76,7 @@ fn vs_edge_main(in: VertIn) -> VertOut {
     out.v_tangent_at_end = in.tangent_at_end;
     out.v_position_px = world_pos; // Pass WORLD position
     out.v_ctrl = in.ctrl;
+    out.v_hovered = in.hovered;
 
     return out;
 }
@@ -142,6 +145,11 @@ fn fs_edge_main(in: VertOut) -> @location(0) vec4<f32> {
     if (in.v_line_type == 3u) {
         color = vec3<f32>(0.4, 0.6, 0.8);
         arrow_color = vec3<f32>(0.4, 0.6, 0.8);
+    }
+
+    if (in.v_hovered == 1u) {
+        color = vec3<f32>(1.0, 0.0, 0.0);
+        arrow_color = vec3<f32>(1.0, 0.0, 0.0);
     }
 
     // No arrow for disjoint edges (type 2)

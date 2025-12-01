@@ -574,6 +574,7 @@ impl State {
                 &node_shapes,
                 &node_types,
                 1.0,
+                &hovered_index,
             );
 
         let edge_shader =
@@ -1452,6 +1453,7 @@ impl State {
             &self.node_shapes,
             &self.node_types,
             self.zoom,
+            &self.hovered_index,
         );
 
         self.queue.write_buffer(

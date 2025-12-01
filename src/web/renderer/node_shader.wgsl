@@ -4,7 +4,7 @@ struct VertIn {
     @location(2) node_type: u32,              // Type of node used when drawing
     @location(3) shape: u32,                  // The shape of the node, 0: Circle, 1: Rectangle
     @location(4) shape_dimensions: vec2<f32>, // The radius of a circle or the width and height of a rectangle
-    @location(5) hovered: u32,
+    @location(5) hovered: u32,                // 1 when hovered, 0 otherwise
 };
 
 struct VertOut {
