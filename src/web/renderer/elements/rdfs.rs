@@ -6,8 +6,8 @@ pub enum RdfsType {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RdfsNode {
     Class,
-    Resource,
     Literal,
+    Resource,
 }
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RdfsEdge {

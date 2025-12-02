@@ -12,6 +12,5 @@ pub enum GenericNode {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum GenericEdge {
     Generic,
-    ValuesFrom,
     NoDraw,
 }

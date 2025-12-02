@@ -7,24 +7,25 @@ pub enum OwlType {
 }
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum OwlNode {
+    AnonymousClass,
     Class,
-    ExternalClass,
-    Thing,
-    EquivalentClass,
-    Union,
-    DisjointUnion,
-    Intersection,
     Complement,
     DeprecatedClass,
-    AnonymousClass,
+    ExternalClass,
+    EquivalentClass,
+    DisjointUnion,
+    Intersection,
+    Thing,
+    Union,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum OwlEdge {
-    ObjectProperty,
     DatatypeProperty,
-    InverseProperty,
     DisjointWith,
     DeprecatedProperty,
     ExternalProperty,
+    InverseProperty,
+    ObjectProperty,
+    ValuesFrom,
 }
