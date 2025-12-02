@@ -1,4 +1,3 @@
-pub mod edge_types;
 pub mod elements;
 pub mod events;
 mod node_shape;

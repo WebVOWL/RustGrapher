@@ -10,7 +10,6 @@ pub use app::init_render;
 /// Exports all the core types of the library.
 pub mod prelude {
     use crate::web::event_dispatcher::EventDispatcher;
-    pub use crate::web::renderer::edge_types::*;
     pub use crate::web::renderer::elements::{
         element_type::ElementType, generic::*, owl::*, rdf::*, rdfs::*,
     };
