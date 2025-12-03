@@ -135,6 +135,11 @@ impl<'a, 'b> Simulator<'a, 'b> {
                         cursor_position.0 = *cursor_pos;
                     }
                     {
+                        // Reset intersection to -1 before checking
+                        let mut intersection = world.fetch_mut::<PointIntersection>();
+                        intersection.0 = -1;
+                    }
+                    {
                         let point_data: DistanceSystemData = world.system_data();
                         distance(point_data);
                     }
