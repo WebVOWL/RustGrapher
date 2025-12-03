@@ -66,6 +66,16 @@ pub struct NodeInstance {
     pub hovered: u32,
 }
 
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct MenuUniforms {
+    pub center: [f32; 2],
+    pub radius_inner: f32,
+    pub radius_outer: f32,
+    pub hovered_segment: i32,
+    pub _padding: [u32; 7],
+}
+
 impl NodeInstance {
     const ATTRIBS: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![1 => Float32x2, 2 => Uint32, 3 => Uint32, 4 => Float32x2, 5 => Uint32];
 

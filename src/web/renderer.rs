@@ -17,7 +17,7 @@ use glyphon::{
 use log::info;
 use specs::{Join, ReaderId, WorldExt};
 use std::{cmp::min, collections::HashMap, sync::Arc};
-use vertex_buffer::{NodeInstance, VERTICES, Vertex, ViewUniforms};
+use vertex_buffer::{MenuUniforms, NodeInstance, VERTICES, Vertex, ViewUniforms};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 use web_time::{Instant, SystemTime};
@@ -27,6 +27,16 @@ use winit::event::MouseButton;
 use winit::platform::web::EventLoopExtWebSys;
 use winit::{dpi::PhysicalPosition, event::MouseScrollDelta};
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
+
+pub struct RadialMenuState {
+    pub active: bool,
+    pub target_node_index: usize,
+    pub center_world: Vec2,
+    pub radius_inner: f32,
+    pub radius_outer: f32,
+    pub hovered_segment: i32, // -1 None, 0 Top (Freeze), 1 Bottom (Subgraph)
+    pub menu_buffers: Option<[GlyphBuffer; 2]>,
+}
 
 pub struct State {
     // #[cfg(target_arch = "wasm32")]
@@ -73,6 +83,7 @@ pub struct State {
     last_pan_position: Option<Vec2>, // Screen space
     pan: Vec2,
     zoom: f32,
+    click_start_pos: Option<Vec2>,
 
     // Events
     reader_id: ReaderId<RenderEvent>,
@@ -91,6 +102,12 @@ pub struct State {
     text_buffers: Option<Vec<GlyphBuffer>>,
     cardinality_text_buffers: Option<Vec<(usize, GlyphBuffer)>>,
     pub window: Arc<Window>,
+
+    // Radial menu
+    radial_menu_pipeline: wgpu::RenderPipeline,
+    radial_menu_bind_group: wgpu::BindGroup,
+    radial_menu_uniform_buffer: wgpu::Buffer,
+    radial_menu_state: RadialMenuState,
 }
 
 impl State {
@@ -714,6 +731,97 @@ impl State {
 
         let simulator = Simulator::builder().build(sim_nodes, sim_edges, sim_sizes);
 
+        // Radial menu setup
+
+        let menu_shader =
+            device.create_shader_module(wgpu::include_wgsl!("./renderer/radial_menu_shader.wgsl"));
+
+        let menu_uniforms = MenuUniforms {
+            center: [0.0, 0.0],
+            radius_inner: 0.0,
+            radius_outer: 0.0,
+            hovered_segment: -1,
+            _padding: [0; 7],
+        };
+
+        let radial_menu_uniform_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Menu Uniform Buffer"),
+                contents: bytemuck::cast_slice(&[menu_uniforms]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+
+        let menu_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("menu_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let radial_menu_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &menu_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: radial_menu_uniform_buffer.as_entire_binding(),
+            }],
+            label: Some("menu_bind_group"),
+        });
+
+        let menu_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Menu Pipeline Layout"),
+            bind_group_layouts: &[&resolution_bind_group_layout, &menu_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let radial_menu_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Radial Menu Pipeline"),
+            layout: Some(&menu_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &menu_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[Vertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &menu_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        let radial_menu_state = RadialMenuState {
+            active: false,
+            target_node_index: 0,
+            center_world: Vec2::ZERO,
+            radius_inner: 0.0,
+            radius_outer: 0.0,
+            hovered_segment: -1,
+            menu_buffers: None,
+        };
+
         // Glyphon: do not create heavy glyphon resources unless we have a non-zero surface.
         // Initialize them lazily below (or on first resize).
         let font_system = None;
@@ -776,6 +884,7 @@ impl State {
             last_pan_position: None,
             pan: Vec2::ZERO,
             zoom: 1.0,
+            click_start_pos: None,
             font_system,
             swash_cache,
             viewport,
@@ -784,6 +893,10 @@ impl State {
             text_buffers,
             cardinality_text_buffers,
             window,
+            radial_menu_pipeline,
+            radial_menu_bind_group,
+            radial_menu_uniform_buffer,
+            radial_menu_state,
         };
 
         if surface_configured {
@@ -1041,6 +1154,25 @@ impl State {
             cardinality_buffers.push((edge_idx, buf));
         }
 
+        // Initialize Radial Menu Buffers
+        let scale = self.window.scale_factor() as f32;
+        let menu_attrs = Attrs::new()
+            .family(Family::SansSerif)
+            .weight(glyphon::Weight::BOLD);
+        let menu_metrics = Metrics::new(14.0 * scale, 14.0 * scale);
+
+        let mut buf_freeze = GlyphBuffer::new(&mut font_system, menu_metrics);
+        buf_freeze.set_text(&mut font_system, "Freeze", &menu_attrs, Shaping::Advanced);
+        buf_freeze.set_size(&mut font_system, Some(200.0 * scale), None);
+        buf_freeze.shape_until_scroll(&mut font_system, false);
+
+        let mut buf_sub = GlyphBuffer::new(&mut font_system, menu_metrics);
+        buf_sub.set_text(&mut font_system, "Subgraph", &menu_attrs, Shaping::Advanced);
+        buf_sub.set_size(&mut font_system, Some(200.0 * scale), None);
+        buf_sub.shape_until_scroll(&mut font_system, false);
+
+        self.radial_menu_state.menu_buffers = Some([buf_freeze, buf_sub]);
+
         self.font_system = Some(font_system);
         self.swash_cache = Some(swash_cache);
         self.viewport = Some(viewport);
@@ -1092,33 +1224,78 @@ impl State {
             return Ok(());
         }
 
-        // Calculate text areas
-        let mut areas: Vec<TextArea> = Vec::new();
         let scale = self.window.scale_factor() as f32;
         let vp_h_px = self.config.height as f32 * scale as f32;
         let vp_w_px = self.config.width as f32 * scale as f32;
 
+        // PRE-CALCULATE LAYOUTS
+
+        // Radial Menu Layout
+        struct MenuLayout {
+            top_rect: (f32, f32), // left, top
+            bot_rect: (f32, f32), // left, top
+            color_top: Color,
+            color_bot: Color,
+        }
+
+        let menu_layout = if self.radial_menu_state.active {
+            let menu = &self.radial_menu_state;
+            let radius_mid = (menu.radius_inner + menu.radius_outer) / 2.0;
+
+            let world_offset_y = radius_mid;
+
+            let top_pos_world = menu.center_world + Vec2::new(0.0, world_offset_y);
+            let bot_pos_world = menu.center_world - Vec2::new(0.0, world_offset_y);
+
+            let top_screen = self.world_to_screen(top_pos_world);
+            let bot_screen = self.world_to_screen(bot_pos_world);
+
+            let color_top = if menu.hovered_segment == 0 {
+                Color::rgb(255, 255, 255)
+            } else {
+                Color::rgb(50, 50, 50)
+            };
+            let color_bot = if menu.hovered_segment == 1 {
+                Color::rgb(255, 255, 255)
+            } else {
+                Color::rgb(50, 50, 50)
+            };
+
+            Some((top_screen, bot_screen, color_top, color_bot))
+        } else {
+            None
+        };
+
+        struct LabelLayout {
+            buffer_index: usize,
+            left: f32,
+            top: f32,
+            scale_factor: f32,
+            bounds: TextBounds,
+        }
+        let mut node_layouts: Vec<LabelLayout> = Vec::with_capacity(self.positions.len());
+
         if let Some(text_buffers) = self.text_buffers.as_ref() {
             for (i, buf) in text_buffers.iter().enumerate() {
-                // node logical coords
+                // Skip hidden nodes
+                if i >= self.node_types.len() {
+                    continue;
+                }
+
+                // Node logical coords
                 let node_logical = match self.node_types[i] {
                     NodeType::InverseProperty => {
-                        let position_x = self.positions[i][0];
-                        let position_y = self.positions[i][1] + 18.0;
-                        Vec2::new(position_x, position_y)
+                        Vec2::new(self.positions[i][0], self.positions[i][1] + 18.0)
                     }
                     NodeType::Complement
                     | NodeType::DisjointUnion
                     | NodeType::Union
                     | NodeType::Intersection => {
-                        let position_x = self.positions[i][0];
-                        let position_y = self.positions[i][1] + 24.0;
-                        Vec2::new(position_x, position_y)
+                        Vec2::new(self.positions[i][0], self.positions[i][1] + 24.0)
                     }
                     _ => Vec2::new(self.positions[i][0], self.positions[i][1]),
                 };
 
-                // convert node coords to physical pixels
                 let screen_pos_logical = self.world_to_screen(node_logical);
                 let y_offset = if self.characteristics.contains_key(&i) {
                     6.0 * self.zoom
@@ -1135,11 +1312,8 @@ impl State {
                 let scaled_label_w = label_w * self.zoom;
                 let scaled_label_h = label_h * self.zoom;
 
-                // center horizontally on node
                 let left = node_x_px - scaled_label_w * 0.5;
-
-                let line_height = 8.0; // Base physical pixels
-                // top = distance from top in physical pixels
+                let line_height = 8.0;
                 let top = match self.node_types[i] {
                     NodeType::EquivalentClass => node_y_px - 2.0 * line_height * self.zoom,
                     _ => node_y_px - (line_height * scale) * self.zoom,
@@ -1148,46 +1322,43 @@ impl State {
                 let right = left + scaled_label_w;
                 let bottom = top + scaled_label_h;
 
-                // Skip text rendering for nodes outside the viewport
+                // Cull
                 if right < 0.0 || left > vp_w_px || bottom < 0.0 || top > vp_h_px {
                     continue;
                 }
 
-                areas.push(TextArea {
-                    buffer: buf,
+                node_layouts.push(LabelLayout {
+                    buffer_index: i,
                     left,
                     top,
-                    scale: self.zoom,
+                    scale_factor: self.zoom,
                     bounds: TextBounds {
                         left: left as i32,
                         top: top as i32,
-                        right: (left + scaled_label_w) as i32,
-                        bottom: (top + scaled_label_h) as i32,
+                        right: right as i32,
+                        bottom: bottom as i32,
                     },
-                    default_color: Color::rgb(0, 0, 0),
-                    custom_glyphs: &[],
                 });
             }
         }
 
-        // cardinalities
+        // Cardinality Layouts
+        let mut card_layouts: Vec<LabelLayout> = Vec::new();
         if let Some(card_buffers) = self.cardinality_text_buffers.as_ref() {
-            for (edge_idx, buf) in card_buffers.iter() {
-                // make sure edge index is valid
+            for (list_idx, (edge_idx, buf)) in card_buffers.iter().enumerate() {
                 if *edge_idx >= self.edges.len() {
                     continue;
                 }
+
                 let edge = self.edges[*edge_idx];
                 let center_idx = edge[1];
                 let end_idx = edge[2];
 
-                // node logical coords
                 let center_log_world =
                     Vec2::new(self.positions[center_idx][0], self.positions[center_idx][1]);
                 let end_log_world =
                     Vec2::new(self.positions[end_idx][0], self.positions[end_idx][1]);
 
-                // direction vector (center - end) in WORLD space
                 let dir_world_x = center_log_world.x - end_log_world.x;
                 let dir_world_y = center_log_world.y - end_log_world.y;
 
@@ -1203,14 +1374,22 @@ impl State {
                     NodeShape::Rectangle { w, h } => {
                         let half_w_world = (w * 0.9 / 2.0) * radius_world;
                         let half_h_world = (h * 0.25 / 2.0) * radius_world;
+                        let nx = if dir_world_x.abs() > 1e-6 {
+                            dir_world_x.signum()
+                        } else {
+                            0.0
+                        };
+                        let ny = if dir_world_y.abs() > 1e-6 {
+                            dir_world_y.signum()
+                        } else {
+                            0.0
+                        };
 
-                        let len_world = (dir_world_x * dir_world_x + dir_world_y * dir_world_y)
-                            .sqrt()
-                            .max(1.0);
+                        let len_sq = dir_world_x * dir_world_x + dir_world_y * dir_world_y;
+                        let len_world = len_sq.sqrt().max(1.0);
                         let nx_world = dir_world_x / len_world;
                         let ny_world = dir_world_y / len_world;
 
-                        // Compute intersection with rectangle perimeter in direction (nx, ny)
                         let tx = if nx_world.abs() > 1e-6 {
                             half_w_world / nx_world.abs()
                         } else {
@@ -1222,66 +1401,155 @@ impl State {
                             f32::INFINITY
                         };
                         let t = tx.min(ty);
-
                         let dist = t + padding_world_rect;
                         (dist, dist)
                     }
                 };
-                // normalized world direction (guard against zero-length)
-                let len_world = (dir_world_x * dir_world_x + dir_world_y * dir_world_y)
-                    .sqrt()
-                    .max(1.0);
+
+                let len_sq = dir_world_x * dir_world_x + dir_world_y * dir_world_y;
+                let len_world = len_sq.sqrt().max(1.0);
                 let nx_world = dir_world_x / len_world;
                 let ny_world = dir_world_y / len_world;
 
-                // place label at end node plus offset
                 let card_world_x = end_log_world.x + nx_world * offset_world_x;
                 let card_world_y = end_log_world.y + ny_world * offset_world_y;
 
-                // now convert this final world pos to screen physical pos
-                let card_world_pos = Vec2::new(card_world_x, card_world_y);
-                let card_screen_phys = self.world_to_screen(card_world_pos) * scale;
-
+                let card_screen_phys =
+                    self.world_to_screen(Vec2::new(card_world_x, card_world_y)) * scale;
                 let card_x_px = card_screen_phys.x;
                 let card_y_px = card_screen_phys.y;
 
-                // compute bounds from buffer size and center the label
-                let (label_w_opt, _label_h_opt) = buf.size();
+                let (label_w_opt, label_h_opt) = buf.size();
                 let label_w = label_w_opt.unwrap_or(48.0) as f32;
-                let label_h = label_w_opt.unwrap_or(24.0) as f32;
-
+                let label_h = label_h_opt.unwrap_or(24.0) as f32;
                 let scaled_label_w = label_w * self.zoom;
                 let scaled_label_h = label_h * self.zoom;
 
                 let left = card_x_px - scaled_label_w * 0.5;
                 let top = card_y_px - scaled_label_h * 0.5;
-
                 let right = left + scaled_label_w;
                 let bottom = top + scaled_label_h;
 
-                // skip text rendering for cardinalities outside the viewport
                 if right < 0.0 || left > vp_w_px || bottom < 0.0 || top > vp_h_px {
                     continue;
                 }
 
-                areas.push(TextArea {
-                    buffer: buf,
+                card_layouts.push(LabelLayout {
+                    buffer_index: list_idx,
                     left,
                     top,
-                    scale: self.zoom,
+                    scale_factor: self.zoom,
                     bounds: TextBounds {
                         left: left as i32,
                         top: top as i32,
-                        right: (left + scaled_label_w) as i32,
-                        bottom: (top + scaled_label_h) as i32,
+                        right: right as i32,
+                        bottom: bottom as i32,
                     },
+                });
+            }
+        }
+
+        // CONSTRUCT TEXT AREAS
+
+        let mut areas: Vec<TextArea> = Vec::new();
+
+        // Radial Menu Areas
+        if let Some((top_screen, bot_screen, c_top, c_bot)) = menu_layout {
+            if let Some(buffers) = &self.radial_menu_state.menu_buffers {
+                // Buffer 0: Freeze (Top)
+                let raw_width_0 = buffers[0]
+                    .layout_runs()
+                    .map(|run| run.line_w)
+                    .fold(0.0, f32::max);
+
+                let raw_width_0 = buffers[0]
+                    .layout_runs()
+                    .map(|run| run.line_w)
+                    .fold(0.0, f32::max);
+
+                // Scale text by zoom
+                let text_scale = self.zoom;
+
+                // Calculate centered position
+                let left_0 = top_screen.x * scale - (raw_width_0 * text_scale) / 2.0;
+
+                // Move text up slightly to center in the ring sector
+                let top_0 = top_screen.y * scale - (10.0 * scale * text_scale);
+
+                areas.push(TextArea {
+                    buffer: &buffers[0],
+                    left: left_0,
+                    top: top_0,
+                    scale: text_scale,
+                    bounds: TextBounds {
+                        left: 0,
+                        top: 0,
+                        right: i32::MAX,
+                        bottom: i32::MAX,
+                    },
+                    default_color: c_top,
+                    custom_glyphs: &[],
+                });
+
+                // Buffer 1: Subgraph (Bottom)
+                let raw_width_1 = buffers[1]
+                    .layout_runs()
+                    .map(|run| run.line_w)
+                    .fold(0.0, f32::max);
+
+                let left_1 = bot_screen.x * scale - (raw_width_1 * text_scale) / 2.0;
+                let top_1 = bot_screen.y * scale - (10.0 * scale * text_scale);
+
+                areas.push(TextArea {
+                    buffer: &buffers[1],
+                    left: left_1,
+                    top: top_1,
+                    scale: text_scale,
+                    bounds: TextBounds {
+                        left: 0,
+                        top: 0,
+                        right: i32::MAX,
+                        bottom: i32::MAX,
+                    },
+                    default_color: c_bot,
+                    custom_glyphs: &[],
+                });
+            }
+        }
+
+        // Node Label Areas
+        if let Some(text_buffers) = self.text_buffers.as_ref() {
+            for layout in node_layouts {
+                areas.push(TextArea {
+                    buffer: &text_buffers[layout.buffer_index],
+                    left: layout.left,
+                    top: layout.top,
+                    scale: layout.scale_factor,
+                    bounds: layout.bounds,
                     default_color: Color::rgb(0, 0, 0),
                     custom_glyphs: &[],
                 });
             }
         }
 
-        // If glyphon isn't initialized yet, skip text rendering for now.
+        // Cardinality Areas
+        if let Some(card_buffers) = self.cardinality_text_buffers.as_ref() {
+            for layout in card_layouts {
+                areas.push(TextArea {
+                    buffer: &card_buffers[layout.buffer_index].1,
+                    left: layout.left,
+                    top: layout.top,
+                    scale: layout.scale_factor,
+                    bounds: layout.bounds,
+                    default_color: Color::rgb(0, 0, 0),
+                    custom_glyphs: &[],
+                });
+            }
+        }
+
+        // RENDER
+
+        // Prepare glyphon
         if let (
             Some(font_system),
             Some(swash_cache),
@@ -1302,9 +1570,7 @@ impl State {
                     height: vp_h_px as u32,
                 },
             );
-            // Clear atlas before preparing text to prevent overflow
             atlas.trim();
-            // Prepare glyphon for rendering
             if let Err(e) = text_renderer.prepare(
                 &self.device,
                 &self.queue,
@@ -1318,6 +1584,7 @@ impl State {
             }
         }
 
+        // Setup Render Pass
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -1336,7 +1603,6 @@ impl State {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            // Background color
                             r: 0.93,
                             g: 0.94,
                             b: 0.95,
@@ -1351,19 +1617,19 @@ impl State {
                 timestamp_writes: None,
             });
 
-            // Draw edges
+            // Edges
             render_pass.set_pipeline(&self.edge_pipeline);
             render_pass.set_vertex_buffer(0, self.edge_vertex_buffer.slice(..));
             render_pass.set_bind_group(0, &self.bind_group0, &[]);
             render_pass.draw(0..self.num_edge_vertices, 0..1);
 
-            // Draw arrow geometry on top of the line strips
+            // Arrows
             render_pass.set_pipeline(&self.arrow_pipeline);
             render_pass.set_vertex_buffer(0, self.arrow_vertex_buffer.slice(..));
             render_pass.set_bind_group(0, &self.bind_group0, &[]);
             render_pass.draw(0..self.num_arrow_vertices, 0..1);
 
-            // Draw all nodes except hovered
+            // Nodes
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.node_instance_buffer.slice(..));
@@ -1387,7 +1653,16 @@ impl State {
                 render_pass.draw(0..self.num_vertices, 0..self.num_instances);
             }
 
-            // Render glyphon text on top of nodes if initialized
+            // Radial Menu
+            if self.radial_menu_state.active {
+                render_pass.set_pipeline(&self.radial_menu_pipeline);
+                render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                render_pass.set_bind_group(0, &self.bind_group0, &[]);
+                render_pass.set_bind_group(1, &self.radial_menu_bind_group, &[]);
+                render_pass.draw(0..6, 0..1);
+            }
+
+            // Text
             if let (Some(atlas), Some(viewport), Some(text_renderer)) = (
                 self.atlas.as_mut(),
                 self.viewport.as_ref(),
@@ -1399,7 +1674,6 @@ impl State {
             }
         }
 
-        // submit will accept anything that implements IntoIter
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
@@ -1437,6 +1711,14 @@ impl State {
             self.positions[*center] = [center_x, center_y];
         }
 
+        if self.radial_menu_state.active {
+            let idx = self.radial_menu_state.target_node_index;
+            if idx < self.positions.len() {
+                self.radial_menu_state.center_world =
+                    Vec2::new(self.positions[idx][0], self.positions[idx][1]);
+            }
+        }
+
         self.hovered_index = self.update_hover();
 
         let node_instances = vertex_buffer::build_node_instances(
@@ -1446,7 +1728,6 @@ impl State {
             &self.hovered_index,
         );
 
-        // Build separate line and arrow vertices and write to their respective buffers
         let (edge_vertices, arrow_vertices) = vertex_buffer::build_line_and_arrow_vertices(
             &self.edges,
             &self.positions,
@@ -1455,6 +1736,35 @@ impl State {
             self.zoom,
             &self.hovered_index,
         );
+
+        // Update menu hover state
+        if self.radial_menu_state.active {
+            if let Some(cursor) = self.cursor_position {
+                // Determine sector
+                let world_cursor = self.screen_to_world(cursor);
+                let diff = world_cursor - self.radial_menu_state.center_world;
+
+                let angle = diff.y.atan2(diff.x);
+                let segment = if angle >= 0.0 { 0 } else { 1 };
+
+                // Visual distance check
+                self.radial_menu_state.hovered_segment = segment;
+
+                // Update Uniform
+                let uniforms = MenuUniforms {
+                    center: self.radial_menu_state.center_world.to_array(),
+                    radius_inner: self.radial_menu_state.radius_inner,
+                    radius_outer: self.radial_menu_state.radius_outer,
+                    hovered_segment: segment,
+                    _padding: [0; 7],
+                };
+                self.queue.write_buffer(
+                    &self.radial_menu_uniform_buffer,
+                    0,
+                    bytemuck::cast_slice(&[uniforms]),
+                );
+            }
+        }
 
         self.queue.write_buffer(
             &self.edge_vertex_buffer,
@@ -1508,11 +1818,12 @@ impl State {
     pub fn handle_mouse_key(&mut self, button: MouseButton, is_pressed: bool) {
         match (button, is_pressed) {
             (MouseButton::Left, true) => {
-                // Begin node dragging on mouse click
+                // Mouse Down
                 if let Some(pos) = self.cursor_position {
+                    self.click_start_pos = self.cursor_position;
+
                     if !self.pan_active {
                         self.node_dragged = true;
-                        // Convert screen coordinates to world coordinates
                         let pos_world = self.screen_to_world(pos);
                         EVENT_DISPATCHER
                             .sim_chan
@@ -1523,7 +1834,9 @@ impl State {
                 }
             }
             (MouseButton::Left, false) => {
-                // Stop node dragging on mouse release
+                // Mouse Up: Handle Actions
+
+                // Stop Dragging
                 if self.node_dragged {
                     self.node_dragged = false;
                     EVENT_DISPATCHER
@@ -1532,6 +1845,70 @@ impl State {
                         .unwrap()
                         .single_write(SimulatorEvent::DragEnd);
                 }
+
+                if let (Some(start), Some(end)) = (self.click_start_pos, self.cursor_position) {
+                    let distance = start.distance(end);
+
+                    if distance < 3.0 {
+                        // Case A: Menu is Active -> Check for selection or close
+                        if self.radial_menu_state.active {
+                            let world_pos = self.screen_to_world(end);
+                            let dist = world_pos.distance(self.radial_menu_state.center_world);
+
+                            let r_inner_world = self.radial_menu_state.radius_inner;
+                            let r_outer_world = self.radial_menu_state.radius_outer;
+
+                            if dist >= r_inner_world && dist <= r_outer_world {
+                                // Clicked inside the ring
+                                match self.radial_menu_state.hovered_segment {
+                                    0 => self.freeze_node(self.radial_menu_state.target_node_index),
+                                    1 => {
+                                        self.subgraph_node(self.radial_menu_state.target_node_index)
+                                    }
+                                    _ => {}
+                                }
+                                self.radial_menu_state.active = false;
+                            } else {
+                                // Clicked outside or in the hole -> Close menu
+                                self.radial_menu_state.active = false;
+                            }
+
+                            // Return early
+                            return;
+                        }
+
+                        // Case B: Menu Not Active -> Check for Node Click
+                        let hovered = self.update_hover();
+                        if hovered != -1 {
+                            // Open radial menu
+                            let idx = hovered as usize;
+
+                            // Determine size based on node shape
+                            let (w_base, h_base) = match self.node_shapes[idx] {
+                                NodeShape::Circle { r } => (r * 50.0, r * 50.0),
+                                NodeShape::Rectangle { w, h } => (w * 42.5, h * 25.0),
+                            };
+                            let base_size = w_base.max(h_base);
+
+                            self.radial_menu_state = RadialMenuState {
+                                active: true,
+                                target_node_index: idx,
+                                center_world: Vec2::new(
+                                    self.positions[idx][0],
+                                    self.positions[idx][1],
+                                ),
+                                radius_inner: base_size + 15.0, // Slight gap
+                                radius_outer: base_size + 65.0, // Ring width
+                                hovered_segment: -1,
+                                menu_buffers: self.radial_menu_state.menu_buffers.clone(),
+                            };
+                        } else {
+                            // Clicked empty space
+                            self.radial_menu_state.active = false;
+                        }
+                    }
+                }
+                self.click_start_pos = None;
             }
             (MouseButton::Right, true) => {
                 // Start panning
@@ -1705,5 +2082,68 @@ impl State {
         }
 
         found_index
+    }
+
+    fn add_menu_labels_to_areas(
+        &mut self,
+        areas: &mut Vec<TextArea>,
+        font_system: &mut FontSystem,
+    ) {
+        let scale = self.window.scale_factor() as f32;
+        let menu = &self.radial_menu_state;
+
+        // Calculate text positions (World -> Screen)
+        let radius_mid = (menu.radius_inner + menu.radius_outer) / 2.0;
+
+        // Top Label (Freeze)
+        let top_pos_world = menu.center_world + Vec2::new(0.0, radius_mid);
+        let world_offset = radius_mid;
+
+        let top_pos = self.world_to_screen(menu.center_world + Vec2::new(0.0, world_offset));
+        let bot_pos = self.world_to_screen(menu.center_world - Vec2::new(0.0, world_offset));
+
+        let mut create_buf = |text: &str, pos: Vec2, color: Color| {
+            let mut buf = GlyphBuffer::new(font_system, Metrics::new(14.0 * scale, 14.0 * scale));
+            buf.set_text(
+                font_system,
+                text,
+                &Attrs::new()
+                    .family(Family::SansSerif)
+                    .weight(glyphon::Weight::BOLD),
+                Shaping::Advanced,
+            );
+            buf.set_size(font_system, Some(100.0 * scale), None);
+            buf.shape_until_scroll(font_system, false);
+
+            // Center alignment logic
+            let width = buf.layout_runs().map(|run| run.line_w).fold(0.0, f32::max);
+            let left = pos.x * scale - width / 2.0;
+            let top = pos.y * scale - (7.0 * scale); // approx half height
+
+            TextArea {
+                buffer: &buf,
+                left,
+                top,
+                scale: 1.0,
+                bounds: TextBounds {
+                    left: 0,
+                    top: 0,
+                    right: i32::MAX,
+                    bottom: i32::MAX,
+                },
+                default_color: color,
+                custom_glyphs: &[],
+            };
+        };
+    }
+
+    fn freeze_node(&self, index: usize) {
+        log::info!("Freeze Node: {}", self.labels[index]);
+        // TODO: Implement freeze logic
+    }
+
+    fn subgraph_node(&self, index: usize) {
+        log::info!("Create Subgraph from Node: {}", self.labels[index]);
+        // TODO: Implement subgraph logic
     }
 }
