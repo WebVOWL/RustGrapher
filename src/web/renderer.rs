@@ -1822,6 +1822,11 @@ impl State {
                 if let Some(pos) = self.cursor_position {
                     self.click_start_pos = self.cursor_position;
 
+                    if !self.node_dragged && self.hovered_index == -1 {
+                        self.pan_active = true;
+                        self.last_pan_position = Some(pos);
+                    }
+
                     if !self.pan_active {
                         self.node_dragged = true;
                         let pos_world = self.screen_to_world(pos);
@@ -1835,6 +1840,9 @@ impl State {
             }
             (MouseButton::Left, false) => {
                 // Mouse Up: Handle Actions
+
+                self.pan_active = false;
+                self.last_pan_position = None;
 
                 // Stop Dragging
                 if self.node_dragged {
@@ -1909,20 +1917,6 @@ impl State {
                     }
                 }
                 self.click_start_pos = None;
-            }
-            (MouseButton::Right, true) => {
-                // Start panning
-                if let Some(pos) = self.cursor_position {
-                    if !self.node_dragged {
-                        self.pan_active = true;
-                        self.last_pan_position = Some(pos);
-                    }
-                }
-            }
-            (MouseButton::Right, false) => {
-                // Stop panning
-                self.pan_active = false;
-                self.last_pan_position = None;
             }
             _ => {}
         }
