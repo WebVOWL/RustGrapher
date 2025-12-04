@@ -17,7 +17,7 @@
     license-file="LICENSE"
     name="grapher"
     readme="README.md"
-    repository="https://github.com/WebVOWL/RustGrapher"
+    repository="https://github.com/WebVOWL/WasmGrapher"
     version="0.4.3"
 
 [lib]
