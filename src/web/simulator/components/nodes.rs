@@ -24,12 +24,15 @@ impl Default for Mass {
     }
 }
 
-/// A fixed node does not compute movement.
-#[derive(Component, Default)]
-#[storage(NullStorage)]
-pub struct Fixed;
+#[derive(Component, Debug, Default, Clone)]
+#[storage(VecStorage)]
+pub struct NodeState {
+    pub fixed: bool,
+    pub dragged: bool,
+}
 
-/// A dragged node has extra force applied to it
-#[derive(Component, Default)]
-#[storage(NullStorage)]
-pub struct Dragged;
+impl NodeState {
+    pub fn is_static(&self) -> bool {
+        self.fixed || self.dragged
+    }
+}

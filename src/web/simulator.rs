@@ -8,7 +8,7 @@ use crate::web::{
         components::{
             edges::Connects,
             forces::NodeForces,
-            nodes::{Fixed, Mass, Position, Velocity},
+            nodes::{Mass, NodeState, Position, Velocity},
         },
         ressources::{
             events::SimulatorEvent,
@@ -34,7 +34,7 @@ use glam::Vec2;
 use rayon::prelude::*;
 use specs::{
     Builder, Dispatcher, DispatcherBuilder, Entities, Join, LazyUpdate, ParJoin, Read, ReadStorage,
-    ReaderId, System, World, WorldExt, Write,
+    ReaderId, System, World, WorldExt, Write, WriteStorage,
 };
 use std::collections::HashMap;
 
@@ -80,8 +80,6 @@ type EventSystemData<'a> = (
     Write<'a, QuadTreeTheta>,
     Write<'a, FreezeThreshold>,
 );
-
-type FixedSystemData<'a> = (Entities<'a>, ReadStorage<'a, Fixed>, Read<'a, LazyUpdate>);
 
 pub struct Simulator<'a, 'b> {
     pub world: World,
@@ -137,6 +135,11 @@ impl<'a, 'b> Simulator<'a, 'b> {
                         cursor_position.0 = *cursor_pos;
                     }
                     {
+                        // Reset intersection to -1 before checking
+                        let mut intersection = world.fetch_mut::<PointIntersection>();
+                        intersection.0 = -1;
+                    }
+                    {
                         let point_data: DistanceSystemData = world.system_data();
                         distance(point_data);
                     }
@@ -162,13 +165,11 @@ impl<'a, 'b> Simulator<'a, 'b> {
                 }
             }
         }
-        // Enable simulation when simulation params are updated
         if event_received {
-            let fixed_data: FixedSystemData = world.system_data();
-            let (entities, fixed, updater) = fixed_data;
+            let mut node_states: WriteStorage<NodeState> = world.system_data();
 
-            (&entities, &fixed).par_join().for_each(|(entity, _)| {
-                updater.remove::<Fixed>(entity);
+            (&mut node_states).par_join().for_each(|state| {
+                state.fixed = false;
             });
         }
     }
@@ -193,8 +194,6 @@ impl SimulatorBuilder {
     }
 
     /// How strong the spring force should be.
-    ///
-    /// Default: `300.0`
     pub fn spring_stiffness(mut self, spring_stiffness: f32) -> Self {
         self.spring_stiffness = spring_stiffness;
         self
@@ -206,24 +205,18 @@ impl SimulatorBuilder {
     /// If edge is longer it pulls together.
     ///
     /// Set to `0` if edges should always pull apart.
-    ///
-    /// Default: `70.0`
     pub fn spring_neutral_length(mut self, neutral_length: f32) -> Self {
         self.spring_neutral_length = neutral_length;
         self
     }
 
     /// How strong the pull to the center should be.
-    ///
-    /// Default: `30.0`
     pub fn gravity_force(mut self, gravity_force: f32) -> Self {
         self.gravity_force = gravity_force;
         self
     }
 
     /// How strong nodes should push others away.
-    ///
-    /// Default: `10e7`
     pub fn repel_force(mut self, repel_force_const: f32) -> Self {
         self.repel_force = repel_force_const;
         self
@@ -234,8 +227,6 @@ impl SimulatorBuilder {
     /// `1.0` -> No Damping
     ///
     /// `0.0` -> No Movement
-    ///
-    /// Default: `0.8`
     pub fn damping(mut self, damping: f32) -> Self {
         self.damping = damping;
         self
@@ -247,8 +238,6 @@ impl SimulatorBuilder {
     /// Value should be between 0.0 and 1.0.
     ///
     /// `0.0` -> No approximation -> n^2 brute force
-    ///
-    /// Default: `0.75`
     pub fn simulation_accuracy(mut self, theta: f32) -> Self {
         self.quadtree_theta = theta;
         self
@@ -256,8 +245,6 @@ impl SimulatorBuilder {
 
     /// Freeze nodes when their velocity falls below `freeze_thresh`.
     /// Set to `-1` to disable
-    ///
-    /// Default: `10.0`
     pub fn freeze_threshold(mut self, freeze_thresh: f32) -> Self {
         self.freeze_thresh = freeze_thresh;
         self
@@ -270,8 +257,6 @@ impl SimulatorBuilder {
     /// `delta_time` is in seconds
     ///
     /// Panics when delta time is `0` or below
-    ///
-    /// Default: `0.005`
     pub fn delta_time(mut self, delta_time: f32) -> Self {
         if delta_time <= 0.0 {
             panic!("delta_time may not be 0 or below!");
@@ -355,6 +340,7 @@ impl SimulatorBuilder {
                 .with(Velocity::default())
                 .with(Mass(sizes[i]))
                 .with(NodeForces::default())
+                .with(NodeState::default())
                 .build();
             node_entities.push(node_entity);
         }
@@ -362,7 +348,6 @@ impl SimulatorBuilder {
         // Create edge components between nodes
         let mut edge_components: HashMap<u32, Connects> = HashMap::new();
         for edge in edges.iter() {
-            // x == edge[0], y == edge[1]
             if let Some(connections) = edge_components.get_mut(&edge[0]) {
                 connections.targets.push(node_entities[edge[1] as usize])
             } else {
