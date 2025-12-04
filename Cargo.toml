@@ -1,6 +1,7 @@
 [package]
     authors=[
         "Alexander Neuhäuser <alexander.neuhaeuser@leafnova.net>",
+        "nikarnik",
         "TheRealMorgenfrue",
     ]
     description="Simulate and visualize a force directed graph"
