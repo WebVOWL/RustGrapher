@@ -1711,7 +1711,6 @@ impl State {
 
     pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
         match (code, is_pressed) {
-            (KeyCode::Escape, true) => event_loop.exit(),
             (KeyCode::Space, true) => {
                 self.paused = !self.paused;
                 self.window.request_redraw();
