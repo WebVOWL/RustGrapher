@@ -11,7 +11,8 @@ pub use app::init_render;
 pub mod prelude {
     use crate::web::event_dispatcher::EventDispatcher;
     pub use crate::web::renderer::elements::{
-        element_type::ElementType, generic::*, owl::*, rdf::*, rdfs::*,
+        characteristic::Characteristic, element_type::ElementType, generic::*, owl::*, rdf::*,
+        rdfs::*,
     };
     pub use crate::web::renderer::events::RenderEvent;
     pub use crate::web::simulator::ressources::events::SimulatorEvent;
