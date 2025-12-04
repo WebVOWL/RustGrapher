@@ -14,9 +14,9 @@ pub enum OwlNode {
     ExternalClass,
     EquivalentClass,
     DisjointUnion,
-    Intersection,
+    IntersectionOff,
     Thing,
-    Union,
+    UnionOf,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -25,7 +25,7 @@ pub enum OwlEdge {
     DisjointWith,
     DeprecatedProperty,
     ExternalProperty,
-    InverseProperty,
+    InverseOf,
     ObjectProperty,
     ValuesFrom,
 }
