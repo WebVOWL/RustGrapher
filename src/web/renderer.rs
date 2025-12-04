@@ -1462,11 +1462,6 @@ impl State {
                     .map(|run| run.line_w)
                     .fold(0.0, f32::max);
 
-                let raw_width_0 = buffers[0]
-                    .layout_runs()
-                    .map(|run| run.line_w)
-                    .fold(0.0, f32::max);
-
                 // Scale text by zoom
                 let text_scale = self.zoom;
 
