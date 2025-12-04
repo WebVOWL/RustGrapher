@@ -58,34 +58,6 @@ impl ApplicationHandler<State> for App {
 
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
 
-        let mut positions = vec![
-            [50.0, 50.0],
-            [250.0, 50.0],
-            [450.0, 50.0],
-            [250.0, 250.0],
-            [650.0, 450.0],
-            [700.0, 50.0],
-            [850.0, 50.0],
-            [1050.0, 50.0],
-            [1050.0, 250.0],
-            [450.0, 250.0],
-            [650.0, 250.0],
-            [850.0, 250.0],
-            [850.0, 450.0],
-            [1250.0, 250.0],
-            [50.0, 500.0],
-            [1250.0, 150.0],
-            [1250.0, 350.0],
-            [150.0, 150.0],
-            [950.0, 100.0],
-            [350.0, 50.0],
-            [950.0, 25.0],
-            [950.0, 50.0],
-            [550.0, 450.0],
-            [575.0, 50.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-        ];
         let mut labels = vec![
             String::from("My class"),
             String::from("Rdfs class"),
@@ -167,7 +139,6 @@ impl ApplicationHandler<State> for App {
         characteristics.insert(21, "transitive".to_string());
         characteristics.insert(23, "functional\ninverse functional".to_string());
         let graph = InitGraph {
-            positions,
             labels,
             edges,
             node_types,

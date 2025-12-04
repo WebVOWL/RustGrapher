@@ -231,13 +231,14 @@ impl State {
 
         let hovered_index = -1;
 
-        let mut positions = graph.positions;
         let mut labels = graph.labels;
 
         let mut node_types = graph.node_types;
 
+        let mut positions = vec![];
+
         let mut node_shapes = vec![];
-        for node_type in &node_types {
+        for (i, node_type) in node_types.iter().enumerate() {
             match node_type {
                 // Circle
                 NodeType::Class
@@ -270,12 +271,22 @@ impl State {
                     node_shapes.push(NodeShape::Rectangle { w: 1.0, h: 1.0 });
                 }
             }
+            positions.push([
+                f32::fract(f32::sin(i as f32) * 12345.6789),
+                f32::fract(f32::sin(i as f32) * 98765.4321),
+            ]);
+        }
+        if positions.len() == 0 {
+            positions.push([0.0, 0.0]);
+            labels.push("".to_string());
+            node_shapes.push(NodeShape::Circle { r: 0.0 });
+            node_types.push(NodeType::NoDraw);
         }
 
         let edges = if graph.edges.len() > 0 {
             graph.edges
         } else {
-            [[0, 0, 0]]
+            vec![[0, 0, 0]]
         };
 
         let cardinalities = graph.cardinalities;
