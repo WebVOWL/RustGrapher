@@ -7,10 +7,12 @@ struct VertexOutput {
     @location(0) uv: vec2<f32>,
 };
 
+// Required to be 16-byte aligned by WebGL
 struct ViewUniforms {
     resolution: vec2<f32>,
     pan: vec2<f32>,
     zoom: f32,
+    _padding: vec2<f32>
 };
 
 struct MenuUniforms {

@@ -217,7 +217,7 @@ impl State {
             resolution: [size.width as f32, size.height as f32],
             pan: [0.0, 0.0],
             zoom: 1.0,
-            _padding: 0.0,
+            _padding: [0.0, 0.0, 0.0],
         };
 
         let view_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
