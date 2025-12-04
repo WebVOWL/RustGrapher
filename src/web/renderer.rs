@@ -243,7 +243,6 @@ impl State {
                 // Circle
                 NodeType::Class
                 | NodeType::ExternalClass
-                | NodeType::Thing
                 | NodeType::EquivalentClass
                 | NodeType::Union
                 | NodeType::DisjointUnion
@@ -255,6 +254,9 @@ impl State {
                 | NodeType::RdfsResource
                 | NodeType::NoDraw => {
                     node_shapes.push(NodeShape::Circle { r: 1.0 });
+                }
+                NodeType::Thing => {
+                    node_shapes.push(NodeShape::Circle { r: 0.7 });
                 }
                 // Rectangle
                 NodeType::Literal
