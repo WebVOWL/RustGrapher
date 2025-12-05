@@ -1,7 +1,7 @@
 struct VertIn {
     @location(0) quad_pos: vec2<f32>,         // [-1..1] quad corner in local space
     @location(1) inst_pos: vec2<f32>,         // per-instance node position in pixels
-    @location(2) node_type: u32,              // Type of node used when drawing
+    @location(2) elements: u32,              // Type of node used when drawing
     @location(3) shape: u32,                  // The shape of the node, 0: Circle, 1: Rectangle
     @location(4) shape_dimensions: vec2<f32>, // The radius of a circle or the width and height of a rectangle
     @location(5) hovered: u32,                // 1 when hovered, 0 otherwise
@@ -10,7 +10,7 @@ struct VertIn {
 struct VertOut {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) v_uv: vec2<f32>, // 0..1 inside quad
-    @interpolate(flat) @location(1) v_node_type: u32,
+    @interpolate(flat) @location(1) v_elements: u32,
     @interpolate(flat) @location(2) v_shape: u32,
     @location(3) v_shape_dimensions: vec2<f32>,
     @interpolate(flat) @location(4) v_hovered: u32,
@@ -44,7 +44,7 @@ fn vs_node_main(
         scale_xy = vec2<f32>(in.shape_dimensions.x, in.shape_dimensions.x);
     }
 
-    // World-space point 
+    // World-space point
     let world_pos = in.inst_pos + in.quad_pos * (NODE_RADIUS_PIX * scale_xy);
 
     // View Transform
@@ -53,7 +53,7 @@ fn vs_node_main(
     let screen_center_px = u_view.resolution * 0.5;
     let screen_offset_px = vec2<f32>(world_rel_zoomed_px.x, -world_rel_zoomed_px.y);
     let screen = screen_center_px + screen_offset_px;
-    
+
     let ndc_x = (screen.x / u_view.resolution.x) * 2.0 - 1.0;
     let ndc_y = 1.0 - (screen.y / u_view.resolution.y) * 2.0;
     out.clip_position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
@@ -61,7 +61,7 @@ fn vs_node_main(
     let aspect = vec2<f32>(in.quad_pos.x, in.quad_pos.y);
     out.v_uv = aspect * 0.5 + vec2<f32>(0.5, 0.5);
 
-    out.v_node_type = in.node_type;
+    out.v_elements = in.elements;
     out.v_shape = in.shape;
     out.v_shape_dimensions = in.shape_dimensions;
     out.v_hovered = in.hovered;
@@ -92,7 +92,7 @@ const HIGHLIGHTED_COLOR = vec3<f32>(1.0, 0.0, 0.0);
 
 @fragment
 fn fs_node_main(in: VertOut) -> @location(0) vec4<f32> {
-    return draw_node_by_type(in.v_node_type, in.v_uv, in.v_shape_dimensions, in.v_hovered);
+    return draw_node_by_type(in.v_elements, in.v_uv, in.v_shape_dimensions, in.v_hovered);
 }
 
 fn draw_class(v_uv: vec2<f32>, hovered: u32) -> vec4<f32> {
@@ -137,7 +137,7 @@ fn draw_external_class(v_uv: vec2<f32>, hovered: u32) -> vec4<f32> {
     if (hovered == 1u) {
         fill_color = HIGHLIGHTED_COLOR;
     }
-    
+
     var col: vec3<f32>;
 
     // blend smoothly: background -> border -> fill
@@ -331,17 +331,17 @@ fn draw_intersection_of(v_uv: vec2<f32>, hovered: u32)  -> vec4<f32> {
     // inner circle masks
     let inner_fill_1 = 1.0 - smoothstep(inner_border_inner_r, inner_border_inner_r + aa_softness_world, d1);
     let inner_fill_2 = 1.0 - smoothstep(inner_border_inner_r, inner_border_inner_r + aa_softness_world, d2);
-    
+
     // Calculate overlapping region (where both circles are filled)
     let overlap_mask = min(inner_fill_1, inner_fill_2);
-    
+
     // Calculate non-overlapping regions (exclusive OR)
     let non_overlap_mask = max(inner_fill_1, inner_fill_2) - overlap_mask;
-    
+
     // Reduce fill intensity where borders exist
     let overlap_final = overlap_mask * (1.0 - inner_border_mask);
     let non_overlap_final = non_overlap_mask * (1.0 - inner_border_mask);
-    
+
     // colors
     let inner_fill_color = SET_COLOR;
     var outer_fill_color = LIGHT_BLUE;
@@ -787,8 +787,86 @@ fn draw_disjoint_with(v_uv: vec2<f32>, shape_dimensions: vec2<f32>, hovered: u32
     return vec4<f32>(col, alpha);
 }
 
-fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>, shape_dimensions: vec2<f32>, hovered: u32) -> vec4<f32> {
-    switch node_type {
+fn draw_node_by_type(elements: u32, v_uv: vec2<f32>, shape_dimensions: vec2<f32>, hovered: u32) -> vec4<f32> {
+    switch elements {
+                    // Reserved
+            0 => {},
+            // RDF edges
+            15000 => {return draw_property(v_uv, shape_dimensions, RDFS_COLOR, hovered);},
+            // RDFS nodes
+            20000 => {return draw_rdfs_class(v_uv, hovered);},
+            20001 => {return draw_literal(v_uv, shape_dimensions, hovered);},
+            20002 => {return draw_rdfs_resource(v_uv, hovered);},
+            // RDFS edges
+            25000 => {return draw_datatype(v_uv, shape_dimensions, hovered);},
+            25001 => {return draw_property(v_uv, shape_dimensions, vec3<f32>(1.0), hovered);},
+            // OWL
+            30000 => ElementType::Owl(OwlType::Node(OwlNode::AnonymousClass)),
+            30001 => ElementType::Owl(OwlType::Node(OwlNode::Class)),
+            30002 => ElementType::Owl(OwlType::Node(OwlNode::Complement)),
+            30003 => ElementType::Owl(OwlType::Node(OwlNode::DeprecatedClass)),
+            30004 => ElementType::Owl(OwlType::Node(OwlNode::ExternalClass)),
+            30005 => ElementType::Owl(OwlType::Node(OwlNode::EquivalentClass)),
+            30006 => ElementType::Owl(OwlType::Node(OwlNode::DisjointUnion)),
+            30007 => ElementType::Owl(OwlType::Node(OwlNode::IntersectionOff)),
+            30008 => ElementType::Owl(OwlType::Node(OwlNode::Thing)),
+            30009 => ElementType::Owl(OwlType::Node(OwlNode::UnionOf)),
+            35000 => ElementType::Owl(OwlType::Edge(OwlEdge::DatatypeProperty)),
+            35001 => ElementType::Owl(OwlType::Edge(OwlEdge::DisjointWith)),
+            35002 => ElementType::Owl(OwlType::Edge(OwlEdge::DeprecatedProperty)),
+            35003 => ElementType::Owl(OwlType::Edge(OwlEdge::ExternalProperty)),
+            35004 => ElementType::Owl(OwlType::Edge(OwlEdge::InverseOf)),
+            35005 => ElementType::Owl(OwlType::Edge(OwlEdge::ObjectProperty)),
+            35006 => ElementType::Owl(OwlType::Edge(OwlEdge::ValuesFrom)),
+            // Generic
+            40000 => ElementType::Generic(GenericType::Node(GenericNode::Generic)),
+            50000 => ElementType::Generic(GenericType::Edge(GenericEdge::Generic)),
+            _ => ElementType::NoDraw,
+
+
+        // ###########
+        // # Generic #
+        // ###########
+
+        // --- Generic nodes
+
+
+        // --- Generic edges
+
+
+        // #######
+        // # RDF #
+        // #######
+
+        // --- RDF nodes ---
+
+
+        // --- RDF edges ---
+        // RdfProperty
+        case 19:
+
+
+        // ########
+        // # RDFS #
+        // ########
+
+        // --- RDFS nodes ---
+        case 10:
+        case 11:
+        case 12:
+
+
+        // --- RDFS edges ---
+        case 13:
+        // SubclassOf
+        case 16:
+
+
+        // #######
+        // # OWL #
+        // #######
+
+        // --- OWL nodes ---
         case 0: {return draw_class(v_uv, hovered);}
         case 1: {return draw_external_class(v_uv, hovered);}
         case 2: {return draw_thing(v_uv, hovered);}
@@ -799,19 +877,23 @@ fn draw_node_by_type(node_type: u32, v_uv: vec2<f32>, shape_dimensions: vec2<f32
         case 7: {return draw_complement(v_uv, hovered);}
         case 8: {return draw_deprecated_class(v_uv, hovered);}
         case 9: {return draw_anonymous_class(v_uv, hovered);}
-        case 10: {return draw_literal(v_uv, shape_dimensions, hovered);}
-        case 11: {return draw_rdfs_class(v_uv, hovered);}
-        case 12: {return draw_rdfs_resource(v_uv, hovered);}
-        case 13: {return draw_datatype(v_uv, shape_dimensions, hovered);}
+
+        // --- OWL edges ---
+        // ObjectProperty
         case 14: {return draw_property(v_uv, shape_dimensions, LIGHT_BLUE, hovered);}
+        // DatatypeProperty
         case 15: {return draw_property(v_uv, shape_dimensions, DATATYPE_PROPERTY_COLOR, hovered);}
-        case 16: {return draw_property(v_uv, shape_dimensions, vec3<f32>(1.0), hovered);}
+        // InverseOf
         case 17: {return draw_inverse_property(v_uv, shape_dimensions, hovered);}
+        // DisjointWith
         case 18: {return draw_disjoint_with(v_uv, shape_dimensions, hovered);}
-        case 19: {return draw_property(v_uv, shape_dimensions, RDFS_COLOR, hovered);}
+        // DeprecatedProperty
         case 20: {return draw_property(v_uv, shape_dimensions, DEPRECATED_COLOR, hovered);}
+        // ExternalProperty
         case 21: {return draw_property(v_uv, shape_dimensions, DARK_BLUE, hovered);}
+        // ValuesFrom
         case 22: {return draw_property(v_uv, shape_dimensions, LIGHT_BLUE, hovered);}
+
         default: {return vec4<f32>(0.0);}
     }
 }

@@ -1,15 +1,15 @@
 //! Event channels for communicating with the renderer from the outside.
 
-use super::PrefixType;
+use super::ElementType;
 
 /// Describes an event received by a render [`State`].
 #[derive(Clone, PartialEq)]
 pub enum RenderEvent {
-    /// Hide a [`NodeType`] during rendering.
-    ElementFiltered(PrefixType),
+    /// Hide a [`ElementType`] during rendering.
+    ElementFiltered(ElementType),
 
-    /// Show a [`NodeType`] during rendering.
-    ElementShown(PrefixType),
+    /// Show a [`ElementType`] during rendering.
+    ElementShown(ElementType),
 
     /// Pause graph simulation.
     Paused,

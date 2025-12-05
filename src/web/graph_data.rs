@@ -1,27 +1,46 @@
-use crate::web::prelude::NodeType;
+pub use crate::web::renderer::elements::element_type::ElementType;
+use rkyv::{Archive, Deserialize, Portable, Serialize};
 use std::collections::HashMap;
 
-pub struct InitGraph {
+/// Struct containing graph data for WasmGrapher
+#[repr(C)]
+#[derive(Archive, Deserialize, Portable, Serialize)]
+pub struct GraphDisplayData {
+    /// Labels annotate classes and properties
+    ///
+    /// The index into this vector is the ID of the node/edge having a label.
+    /// The ID is defined by the indices of `elements`.
     pub labels: Vec<String>,
+    /// Elements are the nodes and edge types for which visualization is supported.
+    ///
+    /// The index into this vector determines the unique ID of each element.
+    pub elements: Vec<ElementType>,
+    /// An array of three elements: `source node`, `edge`, and `target node`.
+    ///
+    /// The elements of the array are node/edge IDs.
+    /// They are defined by the indices of `elements`.
     pub edges: Vec<[usize; 3]>,
-    pub node_types: Vec<NodeType>,
+    /// Cardinalities of edges.
+    ///
+    /// The tuple consists of 2 elements:
+    ///     - u32: The ID of the edge. Defined by the indices of `elements`.
+    ///     - (String, Option<String>):
+    ///         - String: The min cardinality of the edge.
+    ///         - Option<String>: The max cardinality of the target edge.
     pub cardinalities: Vec<(u32, (String, Option<String>))>,
+    /// Special node types. For instance "transitive" or "inverse functional".
+    ///
+    /// The hashmap consists of:
+    ///     - usize: The ID of the node. Defined by the indices of `elements`.
+    ///     - String: The name of the node type. E.g. "transitive".
     pub characteristics: HashMap<usize, String>,
 }
 
-impl Default for InitGraph {
-    fn default() -> InitGraph {
-        InitGraph {
-            labels: Vec::new(),
-            edges: Vec::new(),
-            node_types: Vec::new(),
-            cardinalities: Vec::new(),
-            characteristics: HashMap::new(),
-        }
+impl GraphDisplayData {
+    pub fn new() -> Self {
+        Self::default()
     }
-}
 
-impl InitGraph {
     pub fn demo() -> Self {
         let labels = vec![
             String::from("My class"),
@@ -51,7 +70,7 @@ impl InitGraph {
             String::new(),
             String::new(),
         ];
-        let node_types = vec![
+        let elements = vec![
             NodeType::Class,
             NodeType::RdfsClass,
             NodeType::RdfsResource,
@@ -104,12 +123,24 @@ impl InitGraph {
         characteristics.insert(21, "transitive".to_string());
         characteristics.insert(23, "functional\ninverse functional".to_string());
 
-        InitGraph {
+        GraphDisplayData {
             labels,
+            elements,
             edges,
-            node_types,
             cardinalities,
             characteristics,
+        }
+    }
+}
+
+impl Default for GraphDisplayData {
+    fn default() -> Self {
+        Self {
+            labels: Vec::new(),
+            elements: Vec::new(),
+            edges: Vec::new(),
+            cardinalities: Vec::new(),
+            characteristics: HashMap::new(),
         }
     }
 }

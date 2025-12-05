@@ -1,5 +1,4 @@
-use crate::web::prelude::NodeType;
-use crate::web::renderer::init_graph::InitGraph;
+use crate::web::{prelude::GraphDisplayData, renderer::graph_data::GraphDisplayData};
 
 use super::renderer::State;
 
@@ -58,7 +57,7 @@ impl ApplicationHandler<State> for App {
 
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
 
-        let graph = InitGraph::demo();
+        let graph = GraphDisplayData::demo();
 
         #[cfg(target_arch = "wasm32")]
         {
