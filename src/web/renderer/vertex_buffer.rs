@@ -1,7 +1,10 @@
 use web_sys::js_sys::Math::atan2;
 use wgpu::util::DeviceExt;
 
-use crate::web::renderer::{elements::element_type::ElementType, node_shape::NodeShape};
+use crate::web::renderer::{
+    elements::{element_type::ElementType, owl::*, rdfs::*},
+    node_shape::NodeShape,
+};
 
 // Number of segments to divide each Bézier curve into for strip generation
 const BEZIER_SEGMENTS: usize = 24;
@@ -204,7 +207,7 @@ pub fn build_line_and_arrow_vertices(
     edges: &[[usize; 3]],
     node_positions: &[[f32; 2]],
     node_shapes: &[NodeShape],
-    node_types: &[PrefixType],
+    node_types: &[ElementType],
     zoom: f32,
     hovered_index: &i32,
 ) -> (Vec<EdgeVertex>, Vec<EdgeVertex>) {
@@ -225,14 +228,17 @@ pub fn build_line_and_arrow_vertices(
         let mut end = node_positions[end_idx];
 
         let line_type = match node_types[center_idx] {
-            PrefixType::SubclassOf => 1,
-            PrefixType::DisjointWith => 2,
-            PrefixType::ValuesFrom => 3,
+            ElementType::Rdfs(RdfsType::Edge(RdfsEdge::SubclassOf)) => 1,
+            ElementType::Owl(OwlType::Edge(OwlEdge::DisjointWith)) => 2,
+            ElementType::Owl(OwlType::Edge(OwlEdge::ValuesFrom)) => 3,
             _ => match node_types[start_idx] {
-                PrefixType::Union
-                | PrefixType::DisjointUnion
-                | PrefixType::Complement
-                | PrefixType::Intersection => 4,
+                ElementType::Owl(OwlType::Node(node)) => match node {
+                    OwlNode::UnionOf
+                    | OwlNode::DisjointUnion
+                    | OwlNode::Complement
+                    | OwlNode::IntersectionOf => 4,
+                    _ => 0,
+                },
                 _ => 0,
             },
         };
@@ -545,7 +551,7 @@ pub fn create_edge_vertex_buffer(
     edges: &[[usize; 3]],
     node_positions: &[[f32; 2]],
     node_shapes: &[NodeShape],
-    node_types: &[PrefixType],
+    node_types: &[ElementType],
     zoom: f32,
     hovered_index: &i32,
 ) -> (wgpu::Buffer, u32, wgpu::Buffer, u32) {

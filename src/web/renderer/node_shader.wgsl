@@ -788,112 +788,40 @@ fn draw_disjoint_with(v_uv: vec2<f32>, shape_dimensions: vec2<f32>, hovered: u32
 }
 
 fn draw_node_by_type(elements: u32, v_uv: vec2<f32>, shape_dimensions: vec2<f32>, hovered: u32) -> vec4<f32> {
+    // Documentation is available in ELEMENT_RANGES.md
     switch elements {
-                    // Reserved
-            0 => {},
+            // Reserved
+            case 0: {return vec4<f32>(0.0);}
             // RDF edges
-            15000 => {return draw_property(v_uv, shape_dimensions, RDFS_COLOR, hovered);},
+            case 15000: {return draw_property(v_uv, shape_dimensions, RDFS_COLOR, hovered);}
             // RDFS nodes
-            20000 => {return draw_rdfs_class(v_uv, hovered);},
-            20001 => {return draw_literal(v_uv, shape_dimensions, hovered);},
-            20002 => {return draw_rdfs_resource(v_uv, hovered);},
+            case 20000: {return draw_rdfs_class(v_uv, hovered);}
+            case 20001: {return draw_literal(v_uv, shape_dimensions, hovered);}
+            case 20002: {return draw_rdfs_resource(v_uv, hovered);}
             // RDFS edges
-            25000 => {return draw_datatype(v_uv, shape_dimensions, hovered);},
-            25001 => {return draw_property(v_uv, shape_dimensions, vec3<f32>(1.0), hovered);},
+            case 25000: {return draw_datatype(v_uv, shape_dimensions, hovered);}
+            case 25001: {return draw_property(v_uv, shape_dimensions, vec3<f32>(1.0), hovered);}
             // OWL
-            30000 => ElementType::Owl(OwlType::Node(OwlNode::AnonymousClass)),
-            30001 => ElementType::Owl(OwlType::Node(OwlNode::Class)),
-            30002 => ElementType::Owl(OwlType::Node(OwlNode::Complement)),
-            30003 => ElementType::Owl(OwlType::Node(OwlNode::DeprecatedClass)),
-            30004 => ElementType::Owl(OwlType::Node(OwlNode::ExternalClass)),
-            30005 => ElementType::Owl(OwlType::Node(OwlNode::EquivalentClass)),
-            30006 => ElementType::Owl(OwlType::Node(OwlNode::DisjointUnion)),
-            30007 => ElementType::Owl(OwlType::Node(OwlNode::IntersectionOff)),
-            30008 => ElementType::Owl(OwlType::Node(OwlNode::Thing)),
-            30009 => ElementType::Owl(OwlType::Node(OwlNode::UnionOf)),
-            35000 => ElementType::Owl(OwlType::Edge(OwlEdge::DatatypeProperty)),
-            35001 => ElementType::Owl(OwlType::Edge(OwlEdge::DisjointWith)),
-            35002 => ElementType::Owl(OwlType::Edge(OwlEdge::DeprecatedProperty)),
-            35003 => ElementType::Owl(OwlType::Edge(OwlEdge::ExternalProperty)),
-            35004 => ElementType::Owl(OwlType::Edge(OwlEdge::InverseOf)),
-            35005 => ElementType::Owl(OwlType::Edge(OwlEdge::ObjectProperty)),
-            35006 => ElementType::Owl(OwlType::Edge(OwlEdge::ValuesFrom)),
+            case 30000: {return draw_anonymous_class(v_uv, hovered);}
+            case 30001: {return draw_class(v_uv, hovered);}
+            case 30002: {return draw_complement(v_uv, hovered);}
+            case 30003: {return draw_deprecated_class(v_uv, hovered);}
+            case 30004: {return draw_external_class(v_uv, hovered);}
+            case 30005: {return draw_equivalent_class(v_uv, hovered);}
+            case 30006: {return draw_union(v_uv, hovered);}
+            case 30007: {return draw_intersection_of(v_uv, hovered);}
+            case 30008: {return draw_thing(v_uv, hovered);}
+            case 30009: {return draw_union(v_uv, hovered);}
+            case 35000: {return draw_property(v_uv, shape_dimensions, DATATYPE_PROPERTY_COLOR, hovered);}
+            case 35001: {return draw_disjoint_with(v_uv, shape_dimensions, hovered);}
+            case 35002: {return draw_property(v_uv, shape_dimensions, DEPRECATED_COLOR, hovered);}
+            case 35003: {return draw_property(v_uv, shape_dimensions, DARK_BLUE, hovered);}
+            case 35004: {return draw_inverse_property(v_uv, shape_dimensions, hovered);}
+            case 35005: {return draw_property(v_uv, shape_dimensions, LIGHT_BLUE, hovered);}
+            case 35006: {return draw_property(v_uv, shape_dimensions, LIGHT_BLUE, hovered);}
             // Generic
-            40000 => ElementType::Generic(GenericType::Node(GenericNode::Generic)),
-            50000 => ElementType::Generic(GenericType::Edge(GenericEdge::Generic)),
-            _ => ElementType::NoDraw,
-
-
-        // ###########
-        // # Generic #
-        // ###########
-
-        // --- Generic nodes
-
-
-        // --- Generic edges
-
-
-        // #######
-        // # RDF #
-        // #######
-
-        // --- RDF nodes ---
-
-
-        // --- RDF edges ---
-        // RdfProperty
-        case 19:
-
-
-        // ########
-        // # RDFS #
-        // ########
-
-        // --- RDFS nodes ---
-        case 10:
-        case 11:
-        case 12:
-
-
-        // --- RDFS edges ---
-        case 13:
-        // SubclassOf
-        case 16:
-
-
-        // #######
-        // # OWL #
-        // #######
-
-        // --- OWL nodes ---
-        case 0: {return draw_class(v_uv, hovered);}
-        case 1: {return draw_external_class(v_uv, hovered);}
-        case 2: {return draw_thing(v_uv, hovered);}
-        case 3: {return draw_equivalent_class(v_uv, hovered);}
-        case 4: {return draw_union(v_uv, hovered);}
-        case 5: {return draw_union(v_uv, hovered);}
-        case 6: {return draw_intersection_of(v_uv, hovered);}
-        case 7: {return draw_complement(v_uv, hovered);}
-        case 8: {return draw_deprecated_class(v_uv, hovered);}
-        case 9: {return draw_anonymous_class(v_uv, hovered);}
-
-        // --- OWL edges ---
-        // ObjectProperty
-        case 14: {return draw_property(v_uv, shape_dimensions, LIGHT_BLUE, hovered);}
-        // DatatypeProperty
-        case 15: {return draw_property(v_uv, shape_dimensions, DATATYPE_PROPERTY_COLOR, hovered);}
-        // InverseOf
-        case 17: {return draw_inverse_property(v_uv, shape_dimensions, hovered);}
-        // DisjointWith
-        case 18: {return draw_disjoint_with(v_uv, shape_dimensions, hovered);}
-        // DeprecatedProperty
-        case 20: {return draw_property(v_uv, shape_dimensions, DEPRECATED_COLOR, hovered);}
-        // ExternalProperty
-        case 21: {return draw_property(v_uv, shape_dimensions, DARK_BLUE, hovered);}
-        // ValuesFrom
-        case 22: {return draw_property(v_uv, shape_dimensions, LIGHT_BLUE, hovered);}
-
-        default: {return vec4<f32>(0.0);}
-    }
+            case 40000: {return vec4<f32>(0.0);} // TODO: Define Generic node
+            case 50000: {return vec4<f32>(0.0);} // TODO: Define Generic edge
+            default: {return vec4<f32>(0.0);}
+}
 }

@@ -238,45 +238,63 @@ impl State {
 
         let mut labels = graph.labels;
 
-        let mut elements = graph.node_types;
+        let mut elements = graph.elements;
 
         let mut positions = vec![];
 
         let mut node_shapes = vec![];
-        for (i, node_type) in elements.iter().enumerate() {
-            match node_type {
-                // Circle
-                NodeType::Class
-                | NodeType::ExternalClass
-                | NodeType::EquivalentClass
-                | NodeType::Union
-                | NodeType::DisjointUnion
-                | NodeType::Intersection
-                | NodeType::Complement
-                | NodeType::DeprecatedClass
-                | NodeType::AnonymousClass
-                | NodeType::RdfsClass
-                | NodeType::RdfsResource
-                | NodeType::NoDraw => {
+        for (i, element) in elements.iter().enumerate() {
+            match element {
+                ElementType::Owl(OwlType::Node(node)) => match node {
+                    OwlNode::Class
+                    | OwlNode::AnonymousClass
+                    | OwlNode::Complement
+                    | OwlNode::DeprecatedClass
+                    | OwlNode::ExternalClass
+                    | OwlNode::DisjointUnion
+                    | OwlNode::EquivalentClass
+                    | OwlNode::IntersectionOf
+                    | OwlNode::UnionOf => {
+                        node_shapes.push(NodeShape::Circle { r: 1.0 });
+                    }
+                    OwlNode::Thing => {
+                        node_shapes.push(NodeShape::Circle { r: 0.7 });
+                    }
+                },
+                ElementType::Owl(OwlType::Edge(edge)) => match edge {
+                    OwlEdge::DatatypeProperty
+                    | OwlEdge::ObjectProperty
+                    | OwlEdge::DisjointWith
+                    | OwlEdge::DeprecatedProperty
+                    | OwlEdge::ExternalProperty
+                    | OwlEdge::InverseOf
+                    | OwlEdge::ValuesFrom => {
+                        node_shapes.push(NodeShape::Rectangle { w: 1.0, h: 1.0 });
+                    }
+                },
+                ElementType::Rdfs(RdfsType::Node(node)) => match node {
+                    RdfsNode::Class | RdfsNode::Resource => {
+                        node_shapes.push(NodeShape::Circle { r: 1.0 });
+                    }
+                    RdfsNode::Literal => {
+                        node_shapes.push(NodeShape::Rectangle { w: 1.0, h: 1.0 });
+                    }
+                },
+                ElementType::Rdfs(RdfsType::Edge(edge)) => match edge {
+                    RdfsEdge::Datatype | RdfsEdge::SubclassOf => {
+                        node_shapes.push(NodeShape::Rectangle { w: 1.0, h: 1.0 });
+                    }
+                },
+                // ElementType::Rdf(RdfType::Node(node)) => todo!(),
+                ElementType::Rdf(RdfType::Edge(edge)) => match edge {
+                    RdfEdge::RdfProperty => {
+                        node_shapes.push(NodeShape::Rectangle { w: 1.0, h: 1.0 });
+                    }
+                },
+                ElementType::NoDraw => {
                     node_shapes.push(NodeShape::Circle { r: 1.0 });
                 }
-                NodeType::Thing => {
-                    node_shapes.push(NodeShape::Circle { r: 0.7 });
-                }
-                // Rectangle
-                NodeType::Literal
-                | NodeType::Datatype
-                | NodeType::ObjectProperty
-                | NodeType::DatatypeProperty
-                | NodeType::SubclassOf
-                | NodeType::InverseProperty
-                | NodeType::DisjointWith
-                | NodeType::RdfProperty
-                | NodeType::DeprecatedProperty
-                | NodeType::ExternalProperty
-                | NodeType::ValuesFrom => {
-                    node_shapes.push(NodeShape::Rectangle { w: 1.0, h: 1.0 });
-                }
+                ElementType::Generic(generic_type) => todo!(),
             }
             positions.push([
                 f32::fract(f32::sin(i as f32) * 12345.6789),
@@ -287,7 +305,7 @@ impl State {
             positions.push([0.0, 0.0]);
             labels.push("".to_string());
             node_shapes.push(NodeShape::Circle { r: 0.0 });
-            elements.push(NodeType::NoDraw);
+            elements.push(ElementType::NoDraw);
         }
 
         let edges = if graph.edges.len() > 0 {
@@ -362,7 +380,7 @@ impl State {
                         OwlNode::Complement
                         | OwlNode::DisjointUnion
                         | OwlNode::UnionOf
-                        | OwlNode::IntersectionOff => {
+                        | OwlNode::IntersectionOf => {
                             max_lines = 1;
                             capped_width = 79.0 * scale;
                         }
@@ -371,6 +389,10 @@ impl State {
                             capped_width *= *r * 2.0 - 0.1;
                         }
                     },
+                    _ => {
+                        max_lines = 2;
+                        capped_width *= *r * 2.0 - 0.1;
+                    }
                 },
                 None => {}
             }
@@ -625,7 +647,10 @@ impl State {
                 .unwrap()
                 .len();
             if num_neighbors < 2
-                || (matches!(elements[*center], NodeType::InverseProperty) && num_neighbors <= 2)
+                || (matches!(
+                    elements[*center],
+                    ElementType::Owl(OwlType::Edge(OwlEdge::InverseOf))
+                ) && num_neighbors <= 2)
             {
                 solitary_edges.push([*start, *center, *end]);
             }
@@ -903,7 +928,7 @@ impl State {
                             | OwlNode::Complement
                             | OwlNode::EquivalentClass
                             | OwlNode::DisjointUnion
-                            | OwlNode::IntersectionOff
+                            | OwlNode::IntersectionOf
                             | OwlNode::UnionOf => 36.0,
                             _ => 24.0,
                         },
@@ -921,7 +946,7 @@ impl State {
                             OwlNode::UnionOf
                             | OwlNode::DisjointUnion
                             | OwlNode::Complement
-                            | OwlNode::IntersectionOff => 75.0,
+                            | OwlNode::IntersectionOf => 75.0,
                             _ => 85.0,
                         },
                         _ => 85.0,
@@ -931,7 +956,7 @@ impl State {
             };
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
             buf.set_wrap(&mut font_system, glyphon::Wrap::Word);
-            // sample label using the NodeType
+            // sample label using the ElementType
             let attrs = &Attrs::new().family(Family::SansSerif);
             let node_type_metrics = Metrics::new(font_px - 3.0, line_px);
             let mut owned_spans: Vec<(String, Attrs)> = Vec::new();
@@ -982,7 +1007,7 @@ impl State {
                             owned_spans.push((label.to_string(), attrs.clone()));
                             owned_spans.push(("\n\n1".to_string(), attrs.clone()));
                         }
-                        OwlNode::IntersectionOff => {
+                        OwlNode::IntersectionOf => {
                             owned_spans.push((label.to_string(), attrs.clone()));
                             owned_spans.push(("\n\n∩".to_string(), attrs.clone()));
                         }
@@ -1233,15 +1258,18 @@ impl State {
 
                 // Node logical coords
                 let node_logical = match self.node_types[i] {
-                    NodeType::InverseProperty => {
+                    ElementType::Owl(OwlType::Edge(OwlEdge::InverseOf)) => {
                         Vec2::new(self.positions[i][0], self.positions[i][1] + 18.0)
                     }
-                    NodeType::Complement
-                    | NodeType::DisjointUnion
-                    | NodeType::Union
-                    | NodeType::Intersection => {
-                        Vec2::new(self.positions[i][0], self.positions[i][1] + 24.0)
-                    }
+                    ElementType::Owl(OwlType::Node(node)) => match node {
+                        OwlNode::Complement
+                        | OwlNode::DisjointUnion
+                        | OwlNode::IntersectionOf
+                        | OwlNode::UnionOf => {
+                            Vec2::new(self.positions[i][0], self.positions[i][1] + 24.0)
+                        }
+                        _ => Vec2::new(self.positions[i][0], self.positions[i][1]),
+                    },
                     _ => Vec2::new(self.positions[i][0], self.positions[i][1]),
                 };
 
@@ -1759,7 +1787,6 @@ impl State {
             _ => {}
         }
     }
-    //
 
     pub fn handle_mouse_key(&mut self, button: MouseButton, is_pressed: bool) {
         match (button, is_pressed) {
@@ -1994,7 +2021,7 @@ impl State {
         // Iterate backwards to prioritize nodes drawn "on top"
         for (i, pos_array) in self.positions.iter().enumerate().rev() {
             // Skip nodes that aren't drawn
-            if matches!(self.node_types[i], NodeType::NoDraw) {
+            if matches!(self.node_types[i], ElementType::NoDraw) {
                 continue;
             }
 
