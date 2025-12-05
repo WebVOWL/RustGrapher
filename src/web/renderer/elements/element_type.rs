@@ -2,9 +2,11 @@ use super::generic::*;
 use super::owl::*;
 use super::rdf::*;
 use super::rdfs::*;
+use rkyv::{Archive, Deserialize, Serialize};
+use std::fmt::Display;
 use std::num::TryFromIntError;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Archive, Deserialize, Serialize)]
 pub enum ElementType {
     Owl(OwlType),
     Rdf(RdfType),
@@ -13,80 +15,77 @@ pub enum ElementType {
     NoDraw,
 }
 
-impl TryFrom<i128> for ElementType {
+impl Display for ElementType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ElementType::NoDraw => write!(f, ""),
+            // ElementType::Rdf(RdfType::Node(node)) => match node {},
+            ElementType::Rdf(RdfType::Edge(edge)) => edge.fmt(f),
+            ElementType::Rdfs(RdfsType::Node(node)) => node.fmt(f),
+            ElementType::Rdfs(RdfsType::Edge(edge)) => edge.fmt(f),
+            ElementType::Owl(OwlType::Node(node)) => node.fmt(f),
+            ElementType::Owl(OwlType::Edge(edge)) => edge.fmt(f),
+            ElementType::Generic(GenericType::Node(node)) => node.fmt(f),
+            ElementType::Generic(GenericType::Edge(edge)) => edge.fmt(f),
+        }
+    }
+}
+
+impl TryFrom<ElementType> for i128 {
     type Error = TryFromIntError;
 
-    fn try_from(value: i128) -> Result<Self, Error> {
-        u64::try_from(value).and_then(|conv| Ok(ElementType::from(conv)))
+    fn try_from(value: ElementType) -> Result<Self, Self::Error> {
+        let out: u32 = value.into();
+        Ok(i128::try_from(out).and_then(|conv| Ok(conv))?)
     }
 }
 
-impl TryFrom<u128> for ElementType {
+impl TryFrom<ElementType> for i64 {
     type Error = TryFromIntError;
 
-    fn try_from(value: u128) -> Result<Self, Error> {
-        u64::try_from(value).and_then(|conv| Ok(ElementType::from(conv)))
+    fn try_from(value: ElementType) -> Result<Self, Self::Error> {
+        let out: u32 = value.into();
+        Ok(i64::try_from(out).and_then(|conv| Ok(conv))?)
     }
 }
 
-impl TryFrom<i64> for ElementType {
+impl TryFrom<ElementType> for i32 {
     type Error = TryFromIntError;
 
-    fn try_from(value: i64) -> Result<Self, Error> {
-        u64::try_from(value).and_then(|conv| Ok(ElementType::from(conv)))
+    fn try_from(value: ElementType) -> Result<Self, Self::Error> {
+        let out: u32 = value.into();
+        Ok(i32::try_from(out).and_then(|conv| Ok(conv))?)
     }
 }
 
-impl TryFrom<i32> for ElementType {
-    type Error = TryFromIntError;
-
-    fn try_from(value: i32) -> Result<Self, Error> {
-        u64::try_from(value).and_then(|conv| Ok(ElementType::from(conv)))
+impl From<ElementType> for u128 {
+    fn from(value: ElementType) -> Self {
+        let out: u32 = value.into();
+        out as u128
     }
 }
 
-impl From<u32> for ElementType {
-    fn from(value: u32) -> Self {
-        ElementType::from(value as u64)
+impl From<ElementType> for u64 {
+    fn from(value: ElementType) -> Self {
+        let out: u32 = value.into();
+        out as u64
     }
 }
 
-impl From<u64> for ElementType {
+impl From<ElementType> for u32 {
     #[doc =  include_str!("../../../../ELEMENT_RANGES.md")]
-    fn from(value: u64) -> Self {
+    fn from(value: ElementType) -> Self {
+        let test = include_str!("../../../../ELEMENT_RANGES.md");
         match value {
-            // Reserved
-            0 => ElementType::NoDraw,
-            // RDF
-            15000 => ElementType::Rdf(RdfType::Edge(RdfEdge::RdfProperty)),
-            // RDFS
-            20000 => ElementType::Rdfs(RdfsType::Node(RdfsNode::Class)),
-            20001 => ElementType::Rdfs(RdfsType::Node(RdfsNode::Literal)),
-            20002 => ElementType::Rdfs(RdfsType::Node(RdfsNode::Resource)),
-            25000 => ElementType::Rdfs(RdfsType::Edge(RdfsEdge::Datatype)),
-            25001 => ElementType::Rdfs(RdfsType::Edge(RdfsEdge::SubclassOf)),
-            // OWL
-            30000 => ElementType::Owl(OwlType::Node(OwlNode::AnonymousClass)),
-            30001 => ElementType::Owl(OwlType::Node(OwlNode::Class)),
-            30002 => ElementType::Owl(OwlType::Node(OwlNode::Complement)),
-            30003 => ElementType::Owl(OwlType::Node(OwlNode::DeprecatedClass)),
-            30004 => ElementType::Owl(OwlType::Node(OwlNode::ExternalClass)),
-            30005 => ElementType::Owl(OwlType::Node(OwlNode::EquivalentClass)),
-            30006 => ElementType::Owl(OwlType::Node(OwlNode::DisjointUnion)),
-            30007 => ElementType::Owl(OwlType::Node(OwlNode::IntersectionOff)),
-            30008 => ElementType::Owl(OwlType::Node(OwlNode::Thing)),
-            30009 => ElementType::Owl(OwlType::Node(OwlNode::UnionOf)),
-            35000 => ElementType::Owl(OwlType::Edge(OwlEdge::DatatypeProperty)),
-            35001 => ElementType::Owl(OwlType::Edge(OwlEdge::DisjointWith)),
-            35002 => ElementType::Owl(OwlType::Edge(OwlEdge::DeprecatedProperty)),
-            35003 => ElementType::Owl(OwlType::Edge(OwlEdge::ExternalProperty)),
-            35004 => ElementType::Owl(OwlType::Edge(OwlEdge::InverseOf)),
-            35005 => ElementType::Owl(OwlType::Edge(OwlEdge::ObjectProperty)),
-            35006 => ElementType::Owl(OwlType::Edge(OwlEdge::ValuesFrom)),
-            // Generic
-            40000 => ElementType::Generic(GenericType::Node(GenericNode::Generic)),
-            50000 => ElementType::Generic(GenericType::Edge(GenericEdge::Generic)),
-            _ => ElementType::NoDraw,
+            ElementType::NoDraw => 0,
+            // ElementType::Rdf(RdfType::Node(node)) => match node {},
+            ElementType::Rdf(RdfType::Edge(edge)) => edge.into(),
+            ElementType::Rdfs(RdfsType::Node(node)) => node.into(),
+            ElementType::Rdfs(RdfsType::Edge(edge)) => edge.into(),
+            ElementType::Owl(OwlType::Node(node)) => node.into(),
+            ElementType::Owl(OwlType::Edge(edge)) => edge.into(),
+            ElementType::Generic(GenericType::Node(node)) => node.into(),
+            ElementType::Generic(GenericType::Edge(edge)) => edge.into(),
         }
     }
 }
