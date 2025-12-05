@@ -1,6 +1,5 @@
-use crate::web::{prelude::GraphDisplayData, renderer::graph_data::GraphDisplayData};
-
 use super::renderer::State;
+use crate::web::graph_data::GraphDisplayData;
 
 use std::{collections::HashMap, sync::Arc};
 

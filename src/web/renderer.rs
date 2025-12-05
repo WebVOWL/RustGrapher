@@ -4,6 +4,7 @@ mod node_shape;
 mod vertex_buffer;
 
 use crate::web::{
+    graph_data::GraphDisplayData,
     prelude::EVENT_DISPATCHER,
     quadtree::QuadTree,
     renderer::{
@@ -12,7 +13,6 @@ use crate::web::{
             rdfs::*,
         },
         events::RenderEvent,
-        graph_data::GraphDisplayData,
         node_shape::NodeShape,
     },
     simulator::{Simulator, components::nodes::Position, ressources::events::SimulatorEvent},
