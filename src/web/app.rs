@@ -11,7 +11,7 @@ use winit::{
     application::ApplicationHandler,
     event::*,
     event_loop::{ActiveEventLoop, EventLoop},
-    keyboard::PhysicalKey,
+    keyboard::{KeyCode, PhysicalKey},
     window::Window,
 };
 
@@ -62,9 +62,8 @@ impl ApplicationHandler<State> for App {
 
         #[cfg(target_arch = "wasm32")]
         {
-            // Run the future asynchronously and use the
-            // proxy to send the results to the event loop
-            if let Some(proxy) = self.proxy.take() {
+            if let Some(proxy) = &self.proxy {
+                let proxy = proxy.clone();
                 wasm_bindgen_futures::spawn_local(async move {
                     assert!(
                         proxy
@@ -93,6 +92,7 @@ impl ApplicationHandler<State> for App {
         }
         self.state = Some(event);
     }
+
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
@@ -140,7 +140,27 @@ impl ApplicationHandler<State> for App {
                         ..
                     },
                 ..
-            } => state.handle_key(event_loop, code, key_state.is_pressed()),
+            } => {
+                // Reset to demo graph when 'r' is pressed
+                if code == KeyCode::KeyR && key_state.is_pressed() {
+                    #[cfg(target_arch = "wasm32")]
+                    if let Some(proxy) = &self.proxy {
+                        let proxy = proxy.clone();
+                        let window = state.window.clone();
+                        let graph = InitGraph::demo();
+
+                        wasm_bindgen_futures::spawn_local(async move {
+                            let _ = proxy.send_event(
+                                State::new(window, graph)
+                                    .await
+                                    .expect("Unable to recreate canvas"),
+                            );
+                        });
+                    }
+                }
+
+                state.handle_key(event_loop, code, key_state.is_pressed())
+            }
             WindowEvent::MouseInput {
                 button,
                 state: button_state,
