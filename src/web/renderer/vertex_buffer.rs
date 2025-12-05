@@ -13,7 +13,9 @@ pub struct ViewUniforms {
     pub resolution: [f32; 2],
     pub pan: [f32; 2],
     pub zoom: f32,
-    pub _padding: f32, // WGSL struct padding
+    /// WGSL struct padding.
+    /// WebGL requires the uniform to be 16-byte aligned.
+    pub _padding: [f32; 3],
 }
 
 #[repr(C)]
