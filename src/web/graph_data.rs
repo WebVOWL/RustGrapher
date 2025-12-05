@@ -1,10 +1,10 @@
-pub use crate::web::renderer::elements::element_type::ElementType;
-use rkyv::{Archive, Deserialize, Portable, Serialize};
+pub use crate::web::renderer::elements::{element_type::ElementType, owl::*, rdf::*, rdfs::*};
+use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Struct containing graph data for WasmGrapher
 #[repr(C)]
-#[derive(Archive, Deserialize, Portable, Serialize)]
+#[derive(Archive, Deserialize, Serialize)]
 pub struct GraphDisplayData {
     /// Labels annotate classes and properties
     ///
@@ -71,32 +71,32 @@ impl GraphDisplayData {
             String::new(),
         ];
         let elements = vec![
-            NodeType::Class,
-            NodeType::RdfsClass,
-            NodeType::RdfsResource,
-            NodeType::ExternalClass,
-            NodeType::Thing,
-            NodeType::EquivalentClass,
-            NodeType::DeprecatedClass,
-            NodeType::AnonymousClass,
-            NodeType::Literal,
-            NodeType::Complement,
-            NodeType::DisjointUnion,
-            NodeType::Intersection,
-            NodeType::Union,
-            NodeType::Datatype,
-            NodeType::ValuesFrom,
-            NodeType::DatatypeProperty,
-            NodeType::DatatypeProperty,
-            NodeType::SubclassOf,
-            NodeType::DisjointWith,
-            NodeType::RdfProperty,
-            NodeType::DeprecatedProperty,
-            NodeType::ExternalProperty,
-            NodeType::ObjectProperty,
-            NodeType::InverseProperty,
-            NodeType::NoDraw,
-            NodeType::NoDraw,
+            ElementType::Owl(OwlType::Node(OwlNode::Class)),
+            ElementType::Rdfs(RdfsType::Node(RdfsNode::Class)),
+            ElementType::Rdfs(RdfsType::Node(RdfsNode::Resource)),
+            ElementType::Owl(OwlType::Node(OwlNode::ExternalClass)),
+            ElementType::Owl(OwlType::Node(OwlNode::Thing)),
+            ElementType::Owl(OwlType::Node(OwlNode::EquivalentClass)),
+            ElementType::Owl(OwlType::Node(OwlNode::DeprecatedClass)),
+            ElementType::Owl(OwlType::Node(OwlNode::AnonymousClass)),
+            ElementType::Rdfs(RdfsType::Node(RdfsNode::Literal)),
+            ElementType::Owl(OwlType::Node(OwlNode::Complement)),
+            ElementType::Owl(OwlType::Node(OwlNode::DisjointUnion)),
+            ElementType::Owl(OwlType::Node(OwlNode::IntersectionOf)),
+            ElementType::Owl(OwlType::Node(OwlNode::UnionOf)),
+            ElementType::Rdfs(RdfsType::Edge(RdfsEdge::Datatype)),
+            ElementType::Owl(OwlType::Edge(OwlEdge::ValuesFrom)),
+            ElementType::Owl(OwlType::Edge(OwlEdge::DatatypeProperty)),
+            ElementType::Owl(OwlType::Edge(OwlEdge::DatatypeProperty)),
+            ElementType::Rdfs(RdfsType::Edge(RdfsEdge::SubclassOf)),
+            ElementType::Owl(OwlType::Edge(OwlEdge::DisjointWith)),
+            ElementType::Rdf(RdfType::Edge(RdfEdge::RdfProperty)),
+            ElementType::Owl(OwlType::Edge(OwlEdge::DatatypeProperty)),
+            ElementType::Owl(OwlType::Edge(OwlEdge::ExternalProperty)),
+            ElementType::Owl(OwlType::Edge(OwlEdge::ObjectProperty)),
+            ElementType::Owl(OwlType::Edge(OwlEdge::InverseOf)),
+            ElementType::NoDraw,
+            ElementType::NoDraw,
         ];
         let edges = vec![
             [0, 14, 1],
