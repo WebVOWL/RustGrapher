@@ -1,15 +1,15 @@
 use crate::web::simulator::{
-    components::nodes::{Dragged, Fixed, Position, Velocity},
+    components::nodes::{NodeState, Position, Velocity},
     ressources::simulator_vars::{
         CursorPosition, Damping, DeltaTime, FreezeThreshold, PointIntersection, WorldSize,
     },
 };
+
 use glam::Vec2;
 use log::info;
 use rayon::prelude::*;
 use specs::prelude::*;
-use specs::shred;
-use specs::{Entities, Join, LazyUpdate, ParJoin, Read, ReadStorage, WriteStorage};
+use specs::{Entities, Join, ParJoin, Read, ReadStorage, WriteStorage, shred};
 
 pub struct UpdateNodePosition;
 
@@ -18,12 +18,10 @@ impl<'a> System<'a> for UpdateNodePosition {
         Entities<'a>,
         WriteStorage<'a, Position>,
         WriteStorage<'a, Velocity>,
-        ReadStorage<'a, Fixed>,
-        ReadStorage<'a, Dragged>,
+        WriteStorage<'a, NodeState>,
         Read<'a, DeltaTime>,
         Read<'a, Damping>,
         Read<'a, FreezeThreshold>,
-        Read<'a, LazyUpdate>,
     );
 
     fn run(
@@ -32,53 +30,33 @@ impl<'a> System<'a> for UpdateNodePosition {
             entities,
             mut positions,
             mut velocities,
-            fixed,
-            dragged,
+            mut node_states,
             delta_time,
             damping,
             freeze_threshold,
-            updater,
         ): Self::SystemData,
     ) {
-        for (entity, velocity, _) in (&entities, &mut velocities, &fixed).join() {
-            if freeze_threshold.0 < velocity.0.abs().length() {
-                // Update is only visible next dispatch
-
-                // TODO: Remove Fixed if the Dragged node is nearby.
-                // Use NEW quadtree implementation for nearby check.
-                updater.remove::<Fixed>(entity);
-            }
-        }
-
-        (
-            &entities,
-            &mut positions,
-            &mut velocities,
-            !&fixed,
-            !&dragged,
-        )
+        (&entities, &mut positions, &mut velocities, &mut node_states)
             .par_join()
-            .for_each(|(entity, pos, velocity, _, _)| {
-                velocity.0 *= damping.0;
-
-                pos.0 += velocity.0 * delta_time.0;
-
-                if pos.0.distance(Vec2::new(0.0, 0.0)) > 10_000_000.0 {
-                    pos.0 = Vec2::new(0.0, 0.0);
+            .for_each(|(entity, pos, velocity, state)| {
+                // Check Freeze Threshold
+                if !state.dragged {
+                    // Automatically freeze/unfreeze based on velocity
+                    if velocity.0.abs().length() < freeze_threshold.0 {
+                        state.fixed = true;
+                    } else {
+                        state.fixed = false;
+                    }
                 }
 
-                // info!(
-                //     "freeze_threshold.0, {0} > velocity.0.abs().length(), {1}",
-                //     freeze_threshold.0,
-                //     velocity.0.abs().length()
-                // );
-                if freeze_threshold.0 > velocity.0.abs().length() {
-                    // Update is only visible next dispatch
+                if !state.is_static() {
+                    velocity.0 *= damping.0;
+                    pos.0 += velocity.0 * delta_time.0;
 
-                    // TODO: Only insert Fixed if the Dragged node is not nearby.
-                    // Use NEW quadtree implementation for nearby check.
-                    updater.insert(entity, Fixed);
-                    // velocity.0 = Vec2::ZERO;
+                    // Safety bounds
+                    if pos.0.distance(Vec2::new(0.0, 0.0)) > 10_000_000.0 {
+                        pos.0 = Vec2::new(0.0, 0.0);
+                    }
                 }
             });
     }
@@ -152,60 +130,58 @@ impl<'a> System<'a> for UpdateNodePosition {
 #[derive(SystemData)]
 pub struct DragStartSystemData<'a> {
     entities: Entities<'a>,
-    fixed: ReadStorage<'a, Fixed>,
+    node_states: WriteStorage<'a, NodeState>,
     dragged_id: Read<'a, PointIntersection>,
-    updater: Read<'a, LazyUpdate>,
 }
 
 /// A node is being dragged.
-pub fn sys_drag_start(data: DragStartSystemData) {
-    // Valid nodes have an ID greater than -1.
+pub fn sys_drag_start(mut data: DragStartSystemData) {
     if data.dragged_id.0 >= 0 {
         info!("[{0}] Drag start", data.dragged_id.0);
 
-        // Enable simulation when node is dragged
-        (&data.entities, &data.fixed)
-            .par_join()
-            .for_each(|(entity, _)| {
-                data.updater.remove::<Fixed>(entity);
-            });
+        // Unfix everything
+        (&mut data.node_states).par_join().for_each(|state| {
+            state.fixed = false;
+        });
 
-        // Except for the dragged node
-        let dragged_entity = data.entities.entity(data.dragged_id.0.try_into().unwrap());
-        data.updater.insert(dragged_entity, Dragged);
+        // Set dragged state on specific node
+        if let Some(state) = data
+            .node_states
+            .get_mut(data.entities.entity(data.dragged_id.0.try_into().unwrap()))
+        {
+            state.dragged = true;
+        }
     }
 }
 
 #[derive(SystemData)]
 pub struct DragEndSystemData<'a> {
     entities: Entities<'a>,
-    dragged: ReadStorage<'a, Dragged>,
-    updater: Read<'a, LazyUpdate>,
+    node_states: WriteStorage<'a, NodeState>,
 }
 
 /// A node is no longer being dragged.
-pub fn sys_drag_end(data: DragEndSystemData) {
-    for (entity, _) in (&data.entities, &data.dragged).join() {
-        info!("[{0}] Drag end", entity.id());
-        data.updater.remove::<Dragged>(entity);
+pub fn sys_drag_end(mut data: DragEndSystemData) {
+    for (_, state) in (&data.entities, &mut data.node_states).join() {
+        if state.dragged {
+            state.dragged = false;
+        }
     }
 }
 
-#[derive(SystemData)]
+#[derive(specs::SystemData)]
 pub struct DraggingSystemData<'a> {
     entities: Entities<'a>,
-    dragged: ReadStorage<'a, Dragged>,
+    node_states: ReadStorage<'a, NodeState>,
     positions: WriteStorage<'a, Position>,
     cursor_position: Read<'a, CursorPosition>,
-    world_size: Read<'a, WorldSize>,
-    updater: Read<'a, LazyUpdate>,
 }
 
 /// The position of the dragged node has changed.
-pub fn sys_dragging(data: DraggingSystemData) {
-    for (entity, pos, _) in (&data.entities, &data.positions, &data.dragged).join() {
-        let world_pos = data.cursor_position.0;
-
-        data.updater.insert(entity, Position(world_pos));
+pub fn sys_dragging(mut data: DraggingSystemData) {
+    for (_, pos, state) in (&data.entities, &mut data.positions, &data.node_states).join() {
+        if state.dragged {
+            pos.0 = data.cursor_position.0;
+        }
     }
 }

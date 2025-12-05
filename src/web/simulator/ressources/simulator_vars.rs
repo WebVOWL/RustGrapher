@@ -81,7 +81,7 @@ impl Default for Damping {
 
 impl Default for QuadTreeTheta {
     fn default() -> Self {
-        Self(0.8)
+        Self(1.0)
     }
 }
 

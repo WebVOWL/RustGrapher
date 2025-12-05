@@ -13,7 +13,9 @@ pub struct ViewUniforms {
     pub resolution: [f32; 2],
     pub pan: [f32; 2],
     pub zoom: f32,
-    pub _padding: f32, // WGSL struct padding
+    /// WGSL struct padding.
+    /// WebGL requires the uniform to be 16-byte aligned.
+    pub _padding: [f32; 3],
 }
 
 #[repr(C)]
@@ -63,11 +65,21 @@ pub struct NodeInstance {
     pub node_type: u32,
     pub shape_type: u32,
     pub shape_dim: [f32; 2],
+    pub hovered: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct MenuUniforms {
+    pub center: [f32; 2],
+    pub radius_inner: f32,
+    pub radius_outer: f32,
+    pub hovered_segment: i32,
+    pub _padding: [u32; 7],
 }
 
 impl NodeInstance {
-    const ATTRIBS: [wgpu::VertexAttribute; 4] =
-        wgpu::vertex_attr_array![1 => Float32x2, 2 => Uint32, 3 => Uint32, 4 => Float32x2];
+    const ATTRIBS: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![1 => Float32x2, 2 => Uint32, 3 => Uint32, 4 => Float32x2, 5 => Uint32];
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         use std::mem;
@@ -83,6 +95,7 @@ pub fn build_node_instances(
     positions: &[[f32; 2]],
     node_types: &[PrefixType],
     node_shapes: &[NodeShape],
+    hovered_index: &i32,
 ) -> Vec<NodeInstance> {
     let mut node_instances: Vec<NodeInstance> = vec![];
     for (i, pos) in positions.iter().enumerate() {
@@ -90,11 +103,13 @@ pub fn build_node_instances(
             NodeShape::Circle { r } => (0, [r, 0.0]),
             NodeShape::Rectangle { w, h } => (1, [w, h]),
         };
+        let hovered = if i as i32 == *hovered_index { 1 } else { 0 };
         node_instances.push(NodeInstance {
             position: *pos,
             node_type: node_types[i] as u32,
             shape_type,
             shape_dim,
+            hovered,
         });
     }
     node_instances
@@ -105,8 +120,9 @@ pub fn create_node_instance_buffer(
     positions: &[[f32; 2]],
     node_types: &[PrefixType],
     node_shapes: &[NodeShape],
+    hovered_index: &i32,
 ) -> wgpu::Buffer {
-    let node_instances = build_node_instances(positions, node_types, node_shapes);
+    let node_instances = build_node_instances(positions, node_types, node_shapes, hovered_index);
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("instance_node_buffer"),
         contents: bytemuck::cast_slice(&node_instances),
@@ -128,10 +144,11 @@ pub struct EdgeVertex {
     pub curve_end: [f32; 2],      // Curve end point (for arrow calculation)
     pub tangent_at_end: [f32; 2], // Tangent direction at t=1
     pub ctrl: [f32; 2],           // Control point for quadratic Bezier
+    pub hovered: u32,
 }
 
 impl EdgeVertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
+    const ATTRIBS: [wgpu::VertexAttribute; 11] = wgpu::vertex_attr_array![
         0 => Float32x2,  // position
         1 => Float32,    // t_param
         2 => Sint32,     // side
@@ -142,6 +159,7 @@ impl EdgeVertex {
         7 => Float32x2,  // curve_end
         8 => Float32x2,  // tangent_at_end
         9 => Float32x2,  // ctrl
+        10 => Uint32,    // hover
     ];
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
@@ -188,6 +206,7 @@ pub fn build_line_and_arrow_vertices(
     node_shapes: &[NodeShape],
     node_types: &[PrefixType],
     zoom: f32,
+    hovered_index: &i32,
 ) -> (Vec<EdgeVertex>, Vec<EdgeVertex>) {
     const LINE_THICKNESS: f32 = 2.25;
     const ARROW_LENGTH_PX: f32 = 10.0;
@@ -333,6 +352,12 @@ pub fn build_line_and_arrow_vertices(
             };
         }
 
+        let hovered = if center_idx as i32 == *hovered_index {
+            1
+        } else {
+            0
+        };
+
         // Compute control point for quadratic Bézier
         let ctrl = [
             (4.0 * center[0] - start[0] - end[0]) * 0.5,
@@ -382,6 +407,7 @@ pub fn build_line_and_arrow_vertices(
                     curve_end: end,
                     tangent_at_end,
                     ctrl,
+                    hovered,
                 });
             }
 
@@ -396,6 +422,7 @@ pub fn build_line_and_arrow_vertices(
                 curve_end: end,
                 tangent_at_end,
                 ctrl,
+                hovered,
             });
             line_vertices.push(EdgeVertex {
                 position: right,
@@ -408,6 +435,7 @@ pub fn build_line_and_arrow_vertices(
                 curve_end: end,
                 tangent_at_end,
                 ctrl,
+                hovered,
             });
         }
 
@@ -456,6 +484,7 @@ pub fn build_line_and_arrow_vertices(
                 curve_end: end,
                 tangent_at_end,
                 ctrl,
+                hovered,
             };
 
             // Triangle 1: tip, left, right
@@ -499,6 +528,7 @@ pub fn build_line_and_arrow_vertices(
                 curve_end: end,
                 tangent_at_end,
                 ctrl,
+                hovered,
             };
 
             arrow_vertices.push(common(tip_padded));
@@ -517,10 +547,17 @@ pub fn create_edge_vertex_buffer(
     node_shapes: &[NodeShape],
     node_types: &[PrefixType],
     zoom: f32,
+    hovered_index: &i32,
 ) -> (wgpu::Buffer, u32, wgpu::Buffer, u32) {
     // Build separate vertex lists
-    let (line_vertices, arrow_vertices) =
-        build_line_and_arrow_vertices(edges, node_positions, node_shapes, node_types, zoom);
+    let (line_vertices, arrow_vertices) = build_line_and_arrow_vertices(
+        edges,
+        node_positions,
+        node_shapes,
+        node_types,
+        zoom,
+        hovered_index,
+    );
 
     let line_count = line_vertices.len() as u32;
     let arrow_count = arrow_vertices.len() as u32;

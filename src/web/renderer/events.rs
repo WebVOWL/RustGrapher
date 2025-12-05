@@ -18,6 +18,9 @@ pub enum RenderEvent {
     Resumed,
 
     /// Zoom the graph.
-    /// Negative values soom out, positive zoom in.
+    /// Negative values zoom out, positive zoom in.
     Zoomed(f64),
+
+    // Zoom to show all nodes
+    CenterGraph,
 }

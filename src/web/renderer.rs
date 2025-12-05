@@ -1,11 +1,15 @@
 pub mod elements;
 pub mod events;
+pub mod init_graph;
 mod node_shape;
 mod vertex_buffer;
 
 use crate::web::{
     prelude::EVENT_DISPATCHER,
-    renderer::{elements::PrefixType, events::RenderEvent, node_shape::NodeShape},
+    quadtree::QuadTree,
+    renderer::{
+        events::RenderEvent, init_graph::InitGraph, node_shape::NodeShape, node_types::NodeType,
+    },
     simulator::{Simulator, components::nodes::Position, ressources::events::SimulatorEvent},
 };
 use glam::Vec2;
@@ -16,15 +20,26 @@ use glyphon::{
 use log::info;
 use specs::{Join, ReaderId, WorldExt};
 use std::{cmp::min, collections::HashMap, sync::Arc};
-use vertex_buffer::{NodeInstance, VERTICES, Vertex, ViewUniforms};
+use vertex_buffer::{MenuUniforms, NodeInstance, VERTICES, Vertex, ViewUniforms};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
+use web_time::{Instant, SystemTime};
 use wgpu::util::DeviceExt;
 use winit::event::MouseButton;
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::EventLoopExtWebSys;
 use winit::{dpi::PhysicalPosition, event::MouseScrollDelta};
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
+
+pub struct RadialMenuState {
+    pub active: bool,
+    pub target_node_index: usize,
+    pub center_world: Vec2,
+    pub radius_inner: f32,
+    pub radius_outer: f32,
+    pub hovered_segment: i32, // -1 None, 0 Top (Freeze), 1 Bottom (Subgraph)
+    pub menu_buffers: Option<[GlyphBuffer; 2]>,
+}
 
 pub struct State {
     // #[cfg(target_arch = "wasm32")]
@@ -60,9 +75,9 @@ pub struct State {
     node_shapes: Vec<NodeShape>,
     cardinalities: Vec<(u32, (String, Option<String>))>,
     characteristics: HashMap<usize, String>,
-    frame_count: u64, // TODO: Remove after implementing simulator
     simulator: Simulator<'static, 'static>,
     paused: bool,
+    hovered_index: i32,
 
     // User input
     cursor_position: Option<Vec2>,
@@ -71,9 +86,14 @@ pub struct State {
     last_pan_position: Option<Vec2>, // Screen space
     pan: Vec2,
     zoom: f32,
+    click_start_pos: Option<Vec2>,
 
     // Events
     reader_id: ReaderId<RenderEvent>,
+
+    // Performance
+    last_fps_time: Instant,
+    fps_counter: u32,
 
     // Glyphon resources are initialized lazily when we have a non-zero surface.
     font_system: Option<FontSystem>,
@@ -85,10 +105,16 @@ pub struct State {
     text_buffers: Option<Vec<GlyphBuffer>>,
     cardinality_text_buffers: Option<Vec<(usize, GlyphBuffer)>>,
     pub window: Arc<Window>,
+
+    // Radial menu
+    radial_menu_pipeline: wgpu::RenderPipeline,
+    radial_menu_bind_group: wgpu::BindGroup,
+    radial_menu_uniform_buffer: wgpu::Buffer,
+    radial_menu_state: RadialMenuState,
 }
 
 impl State {
-    pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
+    pub async fn new(window: Arc<Window>, graph: InitGraph) -> anyhow::Result<Self> {
         // Check if we can use WebGPU (as of this writing it's only enabled in some browsers)
         let is_webgpu_enabled = wgpu::util::is_browser_webgpu_supported().await;
 
@@ -194,7 +220,7 @@ impl State {
             resolution: [size.width as f32, size.height as f32],
             pan: [0.0, 0.0],
             zoom: 1.0,
-            _padding: 0.0,
+            _padding: [0.0, 0.0, 0.0],
         };
 
         let view_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -203,148 +229,71 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // TODO: remove test code after implementing ontology loading
-        let positions = [
-            [50.0, 50.0],
-            [250.0, 50.0],
-            [450.0, 50.0],
-            [250.0, 250.0],
-            [650.0, 450.0],
-            [700.0, 50.0],
-            [850.0, 50.0],
-            [1050.0, 50.0],
-            [1050.0, 250.0],
-            [450.0, 250.0],
-            [650.0, 250.0],
-            [850.0, 250.0],
-            [850.0, 450.0],
-            [1250.0, 250.0],
-            [50.0, 500.0],
-            [1250.0, 150.0],
-            [1250.0, 350.0],
-            [150.0, 150.0],
-            [950.0, 100.0],
-            [350.0, 50.0],
-            [950.0, 25.0],
-            [950.0, 50.0],
-            [550.0, 450.0],
-            [575.0, 50.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-        ];
-        let labels = vec![
-            String::from("My class"),
-            String::from("Rdfs class"),
-            String::from("Rdfs resource"),
-            String::from("Loooooooong class 1 2 3 4 5 6 7 8 9"),
-            String::from("Thing"),
-            String::from("Eq1\nEq2\nEq3"),
-            String::from("Deprecated"),
-            String::new(),
-            String::from("Literal"),
-            String::new(),
-            String::from("DisjointUnion 1 2 3 4 5 6 7 8 9"),
-            String::new(),
-            String::new(),
-            String::from("This Datatype is very long"),
-            String::from("AllValues"),
-            String::from("Property1"),
-            String::from("Property2"),
-            String::new(),
-            String::new(),
-            String::from("is a"),
-            String::from("Deprecated"),
-            String::from("External"),
-            String::from("Symmetric"),
-            String::from("Property\nInverseProperty"),
-            String::new(),
-            String::new(),
-        ];
+        let hovered_index = -1;
 
-        let node_types = [
-            PrefixType::Class,
-            PrefixType::RdfsClass,
-            PrefixType::RdfsResource,
-            PrefixType::ExternalClass,
-            PrefixType::Thing,
-            PrefixType::EquivalentClass,
-            PrefixType::DeprecatedClass,
-            PrefixType::AnonymousClass,
-            PrefixType::Literal,
-            PrefixType::Complement,
-            PrefixType::DisjointUnion,
-            PrefixType::Intersection,
-            PrefixType::Union,
-            PrefixType::Datatype,
-            PrefixType::ValuesFrom,
-            PrefixType::DatatypeProperty,
-            PrefixType::DatatypeProperty,
-            PrefixType::SubclassOf,
-            PrefixType::DisjointWith,
-            PrefixType::RdfProperty,
-            PrefixType::DeprecatedProperty,
-            PrefixType::ExternalProperty,
-            PrefixType::ObjectProperty,
-            PrefixType::InverseProperty,
-            PrefixType::NoDraw,
-            PrefixType::NoDraw,
-        ];
+        let mut labels = graph.labels;
 
-        let node_shapes = vec![
-            NodeShape::Circle { r: 1.0 },
-            NodeShape::Circle { r: 1.0 },
-            NodeShape::Circle { r: 1.0 },
-            NodeShape::Circle { r: 1.25 },
-            NodeShape::Circle { r: 0.8 },
-            NodeShape::Circle { r: 1.2 },
-            NodeShape::Circle { r: 1.1 },
-            NodeShape::Circle { r: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Circle { r: 1.0 },
-            NodeShape::Circle { r: 1.0 },
-            NodeShape::Circle { r: 1.0 },
-            NodeShape::Circle { r: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Rectangle { w: 0.75, h: 1.0 },
-            NodeShape::Rectangle { w: 0.6, h: 1.0 },
-            NodeShape::Rectangle { w: 0.8, h: 1.0 },
-            NodeShape::Rectangle { w: 0.8, h: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-        ];
+        let mut node_types = graph.node_types;
 
-        let edges = [
-            [0, 14, 1],
-            [13, 15, 8],
-            [8, 16, 13],
-            [0, 17, 3],
-            [9, 18, 12],
-            [1, 19, 2],
-            [10, 24, 11],
-            [11, 25, 12],
-            [6, 20, 7],
-            [6, 21, 7],
-            [4, 22, 4],
-            [2, 23, 5],
-            [5, 23, 2],
-        ];
+        let mut positions = vec![];
 
-        let cardinalities: Vec<(u32, (String, Option<String>))> = vec![
-            (0, ("∀".to_string(), None)),
-            (8, ("1".to_string(), None)),
-            (1, ("1".to_string(), Some("10".to_string()))),
-            (10, ("5".to_string(), Some("10".to_string()))),
-        ];
+        let mut node_shapes = vec![];
+        for (i, node_type) in node_types.iter().enumerate() {
+            match node_type {
+                // Circle
+                NodeType::Class
+                | NodeType::ExternalClass
+                | NodeType::EquivalentClass
+                | NodeType::Union
+                | NodeType::DisjointUnion
+                | NodeType::Intersection
+                | NodeType::Complement
+                | NodeType::DeprecatedClass
+                | NodeType::AnonymousClass
+                | NodeType::RdfsClass
+                | NodeType::RdfsResource
+                | NodeType::NoDraw => {
+                    node_shapes.push(NodeShape::Circle { r: 1.0 });
+                }
+                NodeType::Thing => {
+                    node_shapes.push(NodeShape::Circle { r: 0.7 });
+                }
+                // Rectangle
+                NodeType::Literal
+                | NodeType::Datatype
+                | NodeType::ObjectProperty
+                | NodeType::DatatypeProperty
+                | NodeType::SubclassOf
+                | NodeType::InverseProperty
+                | NodeType::DisjointWith
+                | NodeType::RdfProperty
+                | NodeType::DeprecatedProperty
+                | NodeType::ExternalProperty
+                | NodeType::ValuesFrom => {
+                    node_shapes.push(NodeShape::Rectangle { w: 1.0, h: 1.0 });
+                }
+            }
+            positions.push([
+                f32::fract(f32::sin(i as f32) * 12345.6789),
+                f32::fract(f32::sin(i as f32) * 98765.4321),
+            ]);
+        }
+        if positions.len() == 0 {
+            positions.push([0.0, 0.0]);
+            labels.push("".to_string());
+            node_shapes.push(NodeShape::Circle { r: 0.0 });
+            node_types.push(NodeType::NoDraw);
+        }
 
-        let mut characteristics = HashMap::new();
-        characteristics.insert(21, "transitive".to_string());
-        characteristics.insert(23, "functional\ninverse functional".to_string());
+        let edges = if graph.edges.len() > 0 {
+            graph.edges
+        } else {
+            vec![[0, 0, 0]]
+        };
+
+        let cardinalities = graph.cardinalities;
+
+        let mut characteristics = graph.characteristics;
 
         // FontSystem instance for text measurement
         let mut font_system =
@@ -410,7 +359,7 @@ impl State {
                     }
                     _ => {
                         max_lines = 2;
-                        capped_width *= *r * 2.0;
+                        capped_width *= *r * 2.0 - 0.1;
                     }
                 },
                 None => {}
@@ -469,6 +418,7 @@ impl State {
             &positions,
             &node_types,
             &node_shapes,
+            &hovered_index,
         );
         let num_instances = positions.len() as u32;
 
@@ -552,6 +502,7 @@ impl State {
                 &node_shapes,
                 &node_types,
                 1.0,
+                &hovered_index,
             );
 
         let edge_shader =
@@ -635,38 +586,38 @@ impl State {
 
         // Exclude properties without neighbors from simulator
         let mut neighbor_map: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
-        for [start, center, end] in edges {
-            let mut neighbors = neighbor_map.get(&(start, end));
+        for [start, center, end] in &edges {
+            let mut neighbors = neighbor_map.get(&(*start, *end));
             if neighbors.is_none() {
-                neighbors = neighbor_map.get(&(end, start));
+                neighbors = neighbor_map.get(&(*end, *start));
             };
             match neighbors {
                 Some(cur_neighbors) => {
                     let mut new_neighbors = cur_neighbors.clone();
-                    new_neighbors.push(center);
+                    new_neighbors.push(*center);
                     neighbor_map.insert(
-                        (usize::min(start, end), usize::max(start, end)),
+                        (usize::min(*start, *end), usize::max(*start, *end)),
                         new_neighbors,
                     );
                 }
                 None => {
                     neighbor_map.insert(
-                        (usize::min(start, end), usize::max(start, end)),
-                        vec![center],
+                        (usize::min(*start, *end), usize::max(*start, *end)),
+                        vec![*center],
                     );
                 }
             }
         }
         let mut solitary_edges: Vec<[usize; 3]> = vec![];
-        for [start, center, end] in edges {
+        for [start, center, end] in &edges {
             let num_neighbors = neighbor_map
-                .get(&(usize::min(start, end), usize::max(start, end)))
+                .get(&(usize::min(*start, *end), usize::max(*start, *end)))
                 .unwrap()
                 .len();
             if num_neighbors < 2
-                || (matches!(node_types[center], PrefixType::InverseProperty) && num_neighbors <= 2)
+                || (matches!(node_types[*center], NodeType::InverseProperty) && num_neighbors <= 2)
             {
-                solitary_edges.push([start, center, end]);
+                solitary_edges.push([*start, *center, *end]);
             }
         }
 
@@ -676,9 +627,9 @@ impl State {
         }
 
         let mut sim_edges = Vec::with_capacity(edges.len());
-        for [start, center, end] in edges {
-            sim_edges.push([start as u32, center as u32]);
-            sim_edges.push([center as u32, end as u32]);
+        for [start, center, end] in &edges {
+            sim_edges.push([*start as u32, *center as u32]);
+            sim_edges.push([*center as u32, *end as u32]);
         }
 
         let mut sim_sizes = Vec::with_capacity(positions.len());
@@ -690,6 +641,97 @@ impl State {
         }
 
         let simulator = Simulator::builder().build(sim_nodes, sim_edges, sim_sizes);
+
+        // Radial menu setup
+
+        let menu_shader =
+            device.create_shader_module(wgpu::include_wgsl!("./renderer/radial_menu_shader.wgsl"));
+
+        let menu_uniforms = MenuUniforms {
+            center: [0.0, 0.0],
+            radius_inner: 0.0,
+            radius_outer: 0.0,
+            hovered_segment: -1,
+            _padding: [0; 7],
+        };
+
+        let radial_menu_uniform_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Menu Uniform Buffer"),
+                contents: bytemuck::cast_slice(&[menu_uniforms]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+
+        let menu_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("menu_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let radial_menu_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &menu_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: radial_menu_uniform_buffer.as_entire_binding(),
+            }],
+            label: Some("menu_bind_group"),
+        });
+
+        let menu_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Menu Pipeline Layout"),
+            bind_group_layouts: &[&resolution_bind_group_layout, &menu_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let radial_menu_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Radial Menu Pipeline"),
+            layout: Some(&menu_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &menu_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[Vertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &menu_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        let radial_menu_state = RadialMenuState {
+            active: false,
+            target_node_index: 0,
+            center_world: Vec2::ZERO,
+            radius_inner: 0.0,
+            radius_outer: 0.0,
+            hovered_segment: -1,
+            menu_buffers: None,
+        };
 
         // Glyphon: do not create heavy glyphon resources unless we have a non-zero surface.
         // Initialize them lazily below (or on first resize).
@@ -741,16 +783,19 @@ impl State {
             node_shapes,
             cardinalities,
             characteristics,
-            frame_count: 0,
             simulator,
             paused: false,
+            hovered_index,
             reader_id,
+            last_fps_time: Instant::now(),
+            fps_counter: 0,
             cursor_position: None,
             node_dragged: false,
             pan_active: false,
             last_pan_position: None,
             pan: Vec2::ZERO,
             zoom: 1.0,
+            click_start_pos: None,
             font_system,
             swash_cache,
             viewport,
@@ -759,6 +804,10 @@ impl State {
             text_buffers,
             cardinality_text_buffers,
             window,
+            radial_menu_pipeline,
+            radial_menu_bind_group,
+            radial_menu_uniform_buffer,
+            radial_menu_state,
         };
 
         if surface_configured {
@@ -794,7 +843,6 @@ impl State {
 
     // Initialize glyphon resources and create one text buffer per node.
     fn init_glyphon(&mut self) {
-        // TODO: Update handling of text overflow to use left alignment, and ellipses at end of string
         if self.font_system.is_some() {
             return; // already initialized
         }
@@ -1016,6 +1064,25 @@ impl State {
             cardinality_buffers.push((edge_idx, buf));
         }
 
+        // Initialize Radial Menu Buffers
+        let scale = self.window.scale_factor() as f32;
+        let menu_attrs = Attrs::new()
+            .family(Family::SansSerif)
+            .weight(glyphon::Weight::BOLD);
+        let menu_metrics = Metrics::new(14.0 * scale, 14.0 * scale);
+
+        let mut buf_freeze = GlyphBuffer::new(&mut font_system, menu_metrics);
+        buf_freeze.set_text(&mut font_system, "Freeze", &menu_attrs, Shaping::Advanced);
+        buf_freeze.set_size(&mut font_system, Some(200.0 * scale), None);
+        buf_freeze.shape_until_scroll(&mut font_system, false);
+
+        let mut buf_sub = GlyphBuffer::new(&mut font_system, menu_metrics);
+        buf_sub.set_text(&mut font_system, "Subgraph", &menu_attrs, Shaping::Advanced);
+        buf_sub.set_size(&mut font_system, Some(200.0 * scale), None);
+        buf_sub.shape_until_scroll(&mut font_system, false);
+
+        self.radial_menu_state.menu_buffers = Some([buf_freeze, buf_sub]);
+
         self.font_system = Some(font_system);
         self.swash_cache = Some(swash_cache);
         self.viewport = Some(viewport);
@@ -1050,37 +1117,95 @@ impl State {
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         self.window.request_redraw();
 
+        self.fps_counter += 1;
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last_fps_time);
+
+        if elapsed.as_secs_f32() >= 1.0 {
+            let fps = self.fps_counter as f32 / elapsed.as_secs_f32();
+            info!("FPS: {:.2}", fps);
+
+            // Reset counters
+            self.last_fps_time = now;
+            self.fps_counter = 0;
+        }
+
         if !self.is_surface_configured {
             return Ok(());
         }
 
-        // Calculate text areas
-        let mut areas: Vec<TextArea> = Vec::new();
         let scale = self.window.scale_factor() as f32;
         let vp_h_px = self.config.height as f32 * scale as f32;
         let vp_w_px = self.config.width as f32 * scale as f32;
 
+        // PRE-CALCULATE LAYOUTS
+
+        // Radial Menu Layout
+        struct MenuLayout {
+            top_rect: (f32, f32), // left, top
+            bot_rect: (f32, f32), // left, top
+            color_top: Color,
+            color_bot: Color,
+        }
+
+        let menu_layout = if self.radial_menu_state.active {
+            let menu = &self.radial_menu_state;
+            let radius_mid = (menu.radius_inner + menu.radius_outer) / 2.0;
+
+            let world_offset_y = radius_mid;
+
+            let top_pos_world = menu.center_world + Vec2::new(0.0, world_offset_y);
+            let bot_pos_world = menu.center_world - Vec2::new(0.0, world_offset_y);
+
+            let top_screen = self.world_to_screen(top_pos_world);
+            let bot_screen = self.world_to_screen(bot_pos_world);
+
+            let color_top = if menu.hovered_segment == 0 {
+                Color::rgb(255, 255, 255)
+            } else {
+                Color::rgb(50, 50, 50)
+            };
+            let color_bot = if menu.hovered_segment == 1 {
+                Color::rgb(255, 255, 255)
+            } else {
+                Color::rgb(50, 50, 50)
+            };
+
+            Some((top_screen, bot_screen, color_top, color_bot))
+        } else {
+            None
+        };
+
+        struct LabelLayout {
+            buffer_index: usize,
+            left: f32,
+            top: f32,
+            scale_factor: f32,
+            bounds: TextBounds,
+        }
+        let mut node_layouts: Vec<LabelLayout> = Vec::with_capacity(self.positions.len());
+
         if let Some(text_buffers) = self.text_buffers.as_ref() {
             for (i, buf) in text_buffers.iter().enumerate() {
-                // node logical coords
+                // Skip hidden nodes
+                if i >= self.node_types.len() {
+                    continue;
+                }
+
+                // Node logical coords
                 let node_logical = match self.node_types[i] {
-                    PrefixType::InverseProperty => {
-                        let position_x = self.positions[i][0];
-                        let position_y = self.positions[i][1] + 18.0;
-                        Vec2::new(position_x, position_y)
+                    NodeType::InverseProperty => {
+                        Vec2::new(self.positions[i][0], self.positions[i][1] + 18.0)
                     }
-                    PrefixType::Complement
-                    | PrefixType::DisjointUnion
-                    | PrefixType::Union
-                    | PrefixType::Intersection => {
-                        let position_x = self.positions[i][0];
-                        let position_y = self.positions[i][1] + 24.0;
-                        Vec2::new(position_x, position_y)
+                    NodeType::Complement
+                    | NodeType::DisjointUnion
+                    | NodeType::Union
+                    | NodeType::Intersection => {
+                        Vec2::new(self.positions[i][0], self.positions[i][1] + 24.0)
                     }
                     _ => Vec2::new(self.positions[i][0], self.positions[i][1]),
                 };
 
-                // convert node coords to physical pixels
                 let screen_pos_logical = self.world_to_screen(node_logical);
                 let y_offset = if self.characteristics.contains_key(&i) {
                     6.0 * self.zoom
@@ -1097,11 +1222,8 @@ impl State {
                 let scaled_label_w = label_w * self.zoom;
                 let scaled_label_h = label_h * self.zoom;
 
-                // center horizontally on node
                 let left = node_x_px - scaled_label_w * 0.5;
-
-                let line_height = 8.0; // Base physical pixels
-                // top = distance from top in physical pixels
+                let line_height = 8.0;
                 let top = match self.node_types[i] {
                     PrefixType::EquivalentClass => node_y_px - 2.0 * line_height * self.zoom,
                     _ => node_y_px - (line_height * scale) * self.zoom,
@@ -1110,46 +1232,43 @@ impl State {
                 let right = left + scaled_label_w;
                 let bottom = top + scaled_label_h;
 
-                // Skip text rendering for nodes outside the viewport
+                // Cull
                 if right < 0.0 || left > vp_w_px || bottom < 0.0 || top > vp_h_px {
                     continue;
                 }
 
-                areas.push(TextArea {
-                    buffer: buf,
+                node_layouts.push(LabelLayout {
+                    buffer_index: i,
                     left,
                     top,
-                    scale: self.zoom,
+                    scale_factor: self.zoom,
                     bounds: TextBounds {
                         left: left as i32,
                         top: top as i32,
-                        right: (left + scaled_label_w) as i32,
-                        bottom: (top + scaled_label_h) as i32,
+                        right: right as i32,
+                        bottom: bottom as i32,
                     },
-                    default_color: Color::rgb(0, 0, 0),
-                    custom_glyphs: &[],
                 });
             }
         }
 
-        // cardinalities
+        // Cardinality Layouts
+        let mut card_layouts: Vec<LabelLayout> = Vec::new();
         if let Some(card_buffers) = self.cardinality_text_buffers.as_ref() {
-            for (edge_idx, buf) in card_buffers.iter() {
-                // make sure edge index is valid
+            for (list_idx, (edge_idx, buf)) in card_buffers.iter().enumerate() {
                 if *edge_idx >= self.edges.len() {
                     continue;
                 }
+
                 let edge = self.edges[*edge_idx];
                 let center_idx = edge[1];
                 let end_idx = edge[2];
 
-                // node logical coords
                 let center_log_world =
                     Vec2::new(self.positions[center_idx][0], self.positions[center_idx][1]);
                 let end_log_world =
                     Vec2::new(self.positions[end_idx][0], self.positions[end_idx][1]);
 
-                // direction vector (center - end) in WORLD space
                 let dir_world_x = center_log_world.x - end_log_world.x;
                 let dir_world_y = center_log_world.y - end_log_world.y;
 
@@ -1165,14 +1284,22 @@ impl State {
                     NodeShape::Rectangle { w, h } => {
                         let half_w_world = (w * 0.9 / 2.0) * radius_world;
                         let half_h_world = (h * 0.25 / 2.0) * radius_world;
+                        let nx = if dir_world_x.abs() > 1e-6 {
+                            dir_world_x.signum()
+                        } else {
+                            0.0
+                        };
+                        let ny = if dir_world_y.abs() > 1e-6 {
+                            dir_world_y.signum()
+                        } else {
+                            0.0
+                        };
 
-                        let len_world = (dir_world_x * dir_world_x + dir_world_y * dir_world_y)
-                            .sqrt()
-                            .max(1.0);
+                        let len_sq = dir_world_x * dir_world_x + dir_world_y * dir_world_y;
+                        let len_world = len_sq.sqrt().max(1.0);
                         let nx_world = dir_world_x / len_world;
                         let ny_world = dir_world_y / len_world;
 
-                        // Compute intersection with rectangle perimeter in direction (nx, ny)
                         let tx = if nx_world.abs() > 1e-6 {
                             half_w_world / nx_world.abs()
                         } else {
@@ -1184,66 +1311,150 @@ impl State {
                             f32::INFINITY
                         };
                         let t = tx.min(ty);
-
                         let dist = t + padding_world_rect;
                         (dist, dist)
                     }
                 };
-                // normalized world direction (guard against zero-length)
-                let len_world = (dir_world_x * dir_world_x + dir_world_y * dir_world_y)
-                    .sqrt()
-                    .max(1.0);
+
+                let len_sq = dir_world_x * dir_world_x + dir_world_y * dir_world_y;
+                let len_world = len_sq.sqrt().max(1.0);
                 let nx_world = dir_world_x / len_world;
                 let ny_world = dir_world_y / len_world;
 
-                // place label at end node plus offset
                 let card_world_x = end_log_world.x + nx_world * offset_world_x;
                 let card_world_y = end_log_world.y + ny_world * offset_world_y;
 
-                // now convert this final world pos to screen physical pos
-                let card_world_pos = Vec2::new(card_world_x, card_world_y);
-                let card_screen_phys = self.world_to_screen(card_world_pos) * scale;
-
+                let card_screen_phys =
+                    self.world_to_screen(Vec2::new(card_world_x, card_world_y)) * scale;
                 let card_x_px = card_screen_phys.x;
                 let card_y_px = card_screen_phys.y;
 
-                // compute bounds from buffer size and center the label
-                let (label_w_opt, _label_h_opt) = buf.size();
+                let (label_w_opt, label_h_opt) = buf.size();
                 let label_w = label_w_opt.unwrap_or(48.0) as f32;
-                let label_h = label_w_opt.unwrap_or(24.0) as f32;
-
+                let label_h = label_h_opt.unwrap_or(24.0) as f32;
                 let scaled_label_w = label_w * self.zoom;
                 let scaled_label_h = label_h * self.zoom;
 
                 let left = card_x_px - scaled_label_w * 0.5;
                 let top = card_y_px - scaled_label_h * 0.5;
-
                 let right = left + scaled_label_w;
                 let bottom = top + scaled_label_h;
 
-                // skip text rendering for cardinalities outside the viewport
                 if right < 0.0 || left > vp_w_px || bottom < 0.0 || top > vp_h_px {
                     continue;
                 }
 
-                areas.push(TextArea {
-                    buffer: buf,
+                card_layouts.push(LabelLayout {
+                    buffer_index: list_idx,
                     left,
                     top,
-                    scale: self.zoom,
+                    scale_factor: self.zoom,
                     bounds: TextBounds {
                         left: left as i32,
                         top: top as i32,
-                        right: (left + scaled_label_w) as i32,
-                        bottom: (top + scaled_label_h) as i32,
+                        right: right as i32,
+                        bottom: bottom as i32,
                     },
+                });
+            }
+        }
+
+        // CONSTRUCT TEXT AREAS
+
+        let mut areas: Vec<TextArea> = Vec::new();
+
+        // Radial Menu Areas
+        if let Some((top_screen, bot_screen, c_top, c_bot)) = menu_layout {
+            if let Some(buffers) = &self.radial_menu_state.menu_buffers {
+                // Buffer 0: Freeze (Top)
+                let raw_width_0 = buffers[0]
+                    .layout_runs()
+                    .map(|run| run.line_w)
+                    .fold(0.0, f32::max);
+
+                // Scale text by zoom
+                let text_scale = self.zoom;
+
+                // Calculate centered position
+                let left_0 = top_screen.x * scale - (raw_width_0 * text_scale) / 2.0;
+
+                // Move text up slightly to center in the ring sector
+                let top_0 = top_screen.y * scale - (10.0 * scale * text_scale);
+
+                areas.push(TextArea {
+                    buffer: &buffers[0],
+                    left: left_0,
+                    top: top_0,
+                    scale: text_scale,
+                    bounds: TextBounds {
+                        left: 0,
+                        top: 0,
+                        right: i32::MAX,
+                        bottom: i32::MAX,
+                    },
+                    default_color: c_top,
+                    custom_glyphs: &[],
+                });
+
+                // Buffer 1: Subgraph (Bottom)
+                let raw_width_1 = buffers[1]
+                    .layout_runs()
+                    .map(|run| run.line_w)
+                    .fold(0.0, f32::max);
+
+                let left_1 = bot_screen.x * scale - (raw_width_1 * text_scale) / 2.0;
+                let top_1 = bot_screen.y * scale - (10.0 * scale * text_scale);
+
+                areas.push(TextArea {
+                    buffer: &buffers[1],
+                    left: left_1,
+                    top: top_1,
+                    scale: text_scale,
+                    bounds: TextBounds {
+                        left: 0,
+                        top: 0,
+                        right: i32::MAX,
+                        bottom: i32::MAX,
+                    },
+                    default_color: c_bot,
+                    custom_glyphs: &[],
+                });
+            }
+        }
+
+        // Node Label Areas
+        if let Some(text_buffers) = self.text_buffers.as_ref() {
+            for layout in node_layouts {
+                areas.push(TextArea {
+                    buffer: &text_buffers[layout.buffer_index],
+                    left: layout.left,
+                    top: layout.top,
+                    scale: layout.scale_factor,
+                    bounds: layout.bounds,
                     default_color: Color::rgb(0, 0, 0),
                     custom_glyphs: &[],
                 });
             }
         }
 
-        // If glyphon isn't initialized yet, skip text rendering for now.
+        // Cardinality Areas
+        if let Some(card_buffers) = self.cardinality_text_buffers.as_ref() {
+            for layout in card_layouts {
+                areas.push(TextArea {
+                    buffer: &card_buffers[layout.buffer_index].1,
+                    left: layout.left,
+                    top: layout.top,
+                    scale: layout.scale_factor,
+                    bounds: layout.bounds,
+                    default_color: Color::rgb(0, 0, 0),
+                    custom_glyphs: &[],
+                });
+            }
+        }
+
+        // RENDER
+
+        // Prepare glyphon
         if let (
             Some(font_system),
             Some(swash_cache),
@@ -1264,9 +1475,7 @@ impl State {
                     height: vp_h_px as u32,
                 },
             );
-            // Clear atlas before preparing text to prevent overflow
             atlas.trim();
-            // Prepare glyphon for rendering
             if let Err(e) = text_renderer.prepare(
                 &self.device,
                 &self.queue,
@@ -1280,6 +1489,7 @@ impl State {
             }
         }
 
+        // Setup Render Pass
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -1298,7 +1508,6 @@ impl State {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            // Background color
                             r: 0.93,
                             g: 0.94,
                             b: 0.95,
@@ -1313,29 +1522,52 @@ impl State {
                 timestamp_writes: None,
             });
 
-            // Draw edges
+            // Edges
             render_pass.set_pipeline(&self.edge_pipeline);
             render_pass.set_vertex_buffer(0, self.edge_vertex_buffer.slice(..));
             render_pass.set_bind_group(0, &self.bind_group0, &[]);
             render_pass.draw(0..self.num_edge_vertices, 0..1);
 
-            // Draw arrow geometry on top of the line strips
+            // Arrows
             render_pass.set_pipeline(&self.arrow_pipeline);
             render_pass.set_vertex_buffer(0, self.arrow_vertex_buffer.slice(..));
             render_pass.set_bind_group(0, &self.bind_group0, &[]);
             render_pass.draw(0..self.num_arrow_vertices, 0..1);
 
-            // Draw nodes
+            // Nodes
             render_pass.set_pipeline(&self.render_pipeline);
-            // set vertex buffers: slot 0 = quad vertices, slot 1 = per-instance positions
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.node_instance_buffer.slice(..));
-            // bind group 0 contains resolution uniform
             render_pass.set_bind_group(0, &self.bind_group0, &[]);
-            // draw one quad per node position (instances)
-            render_pass.draw(0..self.num_vertices, 0..self.num_instances);
 
-            // Render glyphon text on top of nodes if initialized
+            if self.hovered_index >= 0 {
+                // Draw 0..hovered_index
+                render_pass.draw(0..self.num_vertices, 0..self.hovered_index as u32);
+                // Draw (hovered_index+1)..num_instances
+                render_pass.draw(
+                    0..self.num_vertices,
+                    (self.hovered_index as u32 + 1)..self.num_instances,
+                );
+                // Draw hovered node last (on top)
+                render_pass.draw(
+                    0..self.num_vertices,
+                    self.hovered_index as u32..(self.hovered_index as u32 + 1),
+                );
+            } else {
+                // No hover, draw all normally
+                render_pass.draw(0..self.num_vertices, 0..self.num_instances);
+            }
+
+            // Radial Menu
+            if self.radial_menu_state.active {
+                render_pass.set_pipeline(&self.radial_menu_pipeline);
+                render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                render_pass.set_bind_group(0, &self.bind_group0, &[]);
+                render_pass.set_bind_group(1, &self.radial_menu_bind_group, &[]);
+                render_pass.draw(0..6, 0..1);
+            }
+
+            // Text
             if let (Some(atlas), Some(viewport), Some(text_renderer)) = (
                 self.atlas.as_mut(),
                 self.viewport.as_ref(),
@@ -1347,7 +1579,6 @@ impl State {
             }
         }
 
-        // submit will accept anything that implements IntoIter
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
@@ -1385,20 +1616,60 @@ impl State {
             self.positions[*center] = [center_x, center_y];
         }
 
+        if self.radial_menu_state.active {
+            let idx = self.radial_menu_state.target_node_index;
+            if idx < self.positions.len() {
+                self.radial_menu_state.center_world =
+                    Vec2::new(self.positions[idx][0], self.positions[idx][1]);
+            }
+        }
+
+        self.hovered_index = self.update_hover();
+
         let node_instances = vertex_buffer::build_node_instances(
             &self.positions,
             &self.node_types,
             &self.node_shapes,
+            &self.hovered_index,
         );
 
-        // Build separate line and arrow vertices and write to their respective buffers
         let (edge_vertices, arrow_vertices) = vertex_buffer::build_line_and_arrow_vertices(
             &self.edges,
             &self.positions,
             &self.node_shapes,
             &self.node_types,
             self.zoom,
+            &self.hovered_index,
         );
+
+        // Update menu hover state
+        if self.radial_menu_state.active {
+            if let Some(cursor) = self.cursor_position {
+                // Determine sector
+                let world_cursor = self.screen_to_world(cursor);
+                let diff = world_cursor - self.radial_menu_state.center_world;
+
+                let angle = diff.y.atan2(diff.x);
+                let segment = if angle >= 0.0 { 0 } else { 1 };
+
+                // Visual distance check
+                self.radial_menu_state.hovered_segment = segment;
+
+                // Update Uniform
+                let uniforms = MenuUniforms {
+                    center: self.radial_menu_state.center_world.to_array(),
+                    radius_inner: self.radial_menu_state.radius_inner,
+                    radius_outer: self.radial_menu_state.radius_outer,
+                    hovered_segment: segment,
+                    _padding: [0; 7],
+                };
+                self.queue.write_buffer(
+                    &self.radial_menu_uniform_buffer,
+                    0,
+                    bytemuck::cast_slice(&[uniforms]),
+                );
+            }
+        }
 
         self.queue.write_buffer(
             &self.edge_vertex_buffer,
@@ -1433,13 +1704,13 @@ impl State {
                     let delta = MouseScrollDelta::PixelDelta(PhysicalPosition { x: 0.0, y: *zoom });
                     self.handle_scroll(delta);
                 }
+                RenderEvent::CenterGraph => self.center_graph(),
             }
         }
     }
 
     pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
         match (code, is_pressed) {
-            (KeyCode::Escape, true) => event_loop.exit(),
             (KeyCode::Space, true) => {
                 self.paused = !self.paused;
                 self.window.request_redraw();
@@ -1447,14 +1718,21 @@ impl State {
             _ => {}
         }
     }
+
     pub fn handle_mouse_key(&mut self, button: MouseButton, is_pressed: bool) {
         match (button, is_pressed) {
             (MouseButton::Left, true) => {
-                // Begin node dragging on mouse click
+                // Mouse Down
                 if let Some(pos) = self.cursor_position {
+                    self.click_start_pos = self.cursor_position;
+
+                    if !self.node_dragged && self.hovered_index == -1 {
+                        self.pan_active = true;
+                        self.last_pan_position = Some(pos);
+                    }
+
                     if !self.pan_active {
                         self.node_dragged = true;
-                        // Convert screen coordinates to world coordinates
                         let pos_world = self.screen_to_world(pos);
                         EVENT_DISPATCHER
                             .sim_chan
@@ -1465,7 +1743,12 @@ impl State {
                 }
             }
             (MouseButton::Left, false) => {
-                // Stop node dragging on mouse release
+                // Mouse Up: Handle Actions
+
+                self.pan_active = false;
+                self.last_pan_position = None;
+
+                // Stop Dragging
                 if self.node_dragged {
                     self.node_dragged = false;
                     EVENT_DISPATCHER
@@ -1474,24 +1757,75 @@ impl State {
                         .unwrap()
                         .single_write(SimulatorEvent::DragEnd);
                 }
-            }
-            (MouseButton::Right, true) => {
-                // Start panning
-                if let Some(pos) = self.cursor_position {
-                    if !self.node_dragged {
-                        self.pan_active = true;
-                        self.last_pan_position = Some(pos);
+
+                if let (Some(start), Some(end)) = (self.click_start_pos, self.cursor_position) {
+                    let distance = start.distance(end);
+
+                    if distance < 3.0 {
+                        // Case A: Menu is Active -> Check for selection or close
+                        if self.radial_menu_state.active {
+                            let world_pos = self.screen_to_world(end);
+                            let dist = world_pos.distance(self.radial_menu_state.center_world);
+
+                            let r_inner_world = self.radial_menu_state.radius_inner;
+                            let r_outer_world = self.radial_menu_state.radius_outer;
+
+                            if dist >= r_inner_world && dist <= r_outer_world {
+                                // Clicked inside the ring
+                                match self.radial_menu_state.hovered_segment {
+                                    0 => self.freeze_node(self.radial_menu_state.target_node_index),
+                                    1 => {
+                                        self.subgraph_node(self.radial_menu_state.target_node_index)
+                                    }
+                                    _ => {}
+                                }
+                                self.radial_menu_state.active = false;
+                            } else {
+                                // Clicked outside or in the hole -> Close menu
+                                self.radial_menu_state.active = false;
+                            }
+
+                            // Return early
+                            return;
+                        }
+
+                        // Case B: Menu Not Active -> Check for Node Click
+                        let hovered = self.update_hover();
+                        if hovered != -1 {
+                            // Open radial menu
+                            let idx = hovered as usize;
+
+                            // Determine size based on node shape
+                            let (w_base, h_base) = match self.node_shapes[idx] {
+                                NodeShape::Circle { r } => (r * 50.0, r * 50.0),
+                                NodeShape::Rectangle { w, h } => (w * 42.5, h * 25.0),
+                            };
+                            let base_size = w_base.max(h_base);
+
+                            self.radial_menu_state = RadialMenuState {
+                                active: true,
+                                target_node_index: idx,
+                                center_world: Vec2::new(
+                                    self.positions[idx][0],
+                                    self.positions[idx][1],
+                                ),
+                                radius_inner: base_size + 15.0, // Slight gap
+                                radius_outer: base_size + 65.0, // Ring width
+                                hovered_segment: -1,
+                                menu_buffers: self.radial_menu_state.menu_buffers.clone(),
+                            };
+                        } else {
+                            // Clicked empty space
+                            self.radial_menu_state.active = false;
+                        }
                     }
                 }
-            }
-            (MouseButton::Right, false) => {
-                // Stop panning
-                self.pan_active = false;
-                self.last_pan_position = None;
+                self.click_start_pos = None;
             }
             _ => {}
         }
     }
+
     pub fn handle_cursor(&mut self, position: PhysicalPosition<f64>) {
         // (x,y) coords in pixels relative to the top-left corner of the window
         let pos_screen = Vec2::new(position.x as f32, position.y as f32);
@@ -1543,9 +1877,9 @@ impl State {
         let world_pos_before = self.screen_to_world(cursor_pos_screen);
 
         // 2. Calculate new zoom
-        let zoom_sensitivity = 0.1;
-        self.zoom *= 1.0 - scroll_amount * zoom_sensitivity; // scroll up (positive y) = zoom in
-        self.zoom = self.zoom.clamp(0.1, 4.0); // Min/max zoom levels
+        let zoom_sensitivity = 0.05;
+        self.zoom *= 1.0 - -scroll_amount * zoom_sensitivity; // scroll down = zoom in
+        self.zoom = self.zoom.clamp(0.05, 4.0); // Min/max zoom levels
 
         // 3. We want the world_pos_before to stay at cursor_pos_screen.
         //    Find the new pan that makes this true.
@@ -1559,5 +1893,155 @@ impl State {
         let world_rel_zoomed = Vec2::new(screen_offset.x, -screen_offset.y);
 
         self.pan = world_pos_before - (world_rel_zoomed / self.zoom);
+    }
+
+    fn center_graph(&mut self) {
+        // Fetch boundary from QuadTree
+        let (center, width, height) = {
+            let quadtree = self.simulator.world.read_resource::<QuadTree>();
+            (
+                quadtree.boundary.center,
+                quadtree.boundary.width,
+                quadtree.boundary.height,
+            )
+        };
+
+        // Prevent division by zero
+        if width <= 0.1 || height <= 0.1 {
+            return;
+        }
+
+        // Calculate Scale
+        let padding_factor = 0.90;
+        let screen_width = self.config.width as f32;
+        let screen_height = self.config.height as f32;
+
+        let zoom_x = screen_width / width;
+        let zoom_y = screen_height / height;
+
+        let new_zoom = zoom_x.min(zoom_y) * padding_factor;
+
+        self.zoom = new_zoom;
+
+        // Calculate Pan
+        self.pan = center;
+
+        self.window.request_redraw();
+    }
+
+    /// Update hovered node
+    fn update_hover(&self) -> i32 {
+        let cursor_pos = match self.cursor_position {
+            Some(pos) => pos,
+            None => return -1,
+        };
+
+        if self.node_dragged {
+            return self.hovered_index;
+        }
+
+        // Convert screen pixel coordinates to world coordinates
+        let world_pos = self.screen_to_world(cursor_pos);
+
+        const BASE_RADIUS: f32 = 50.0;
+        const BASE_WIDTH: f32 = 85.0;
+        const BASE_HEIGHT: f32 = 50.0;
+
+        let mut found_index = -1;
+
+        // Iterate backwards to prioritize nodes drawn "on top"
+        for (i, pos_array) in self.positions.iter().enumerate().rev() {
+            // Skip nodes that aren't drawn
+            if matches!(self.node_types[i], NodeType::NoDraw) {
+                continue;
+            }
+
+            let pos = Vec2::new(pos_array[0], pos_array[1]);
+            let delta = world_pos - pos;
+
+            let is_hovered = match self.node_shapes[i] {
+                NodeShape::Circle { r } => {
+                    // Check distance against scaled radius
+                    delta.length_squared() <= (BASE_RADIUS * r).powi(2)
+                }
+                NodeShape::Rectangle { w, h } => {
+                    // Check Axis-Aligned Bounding Box (AABB)
+                    let half_w = (BASE_WIDTH * w) / 2.0;
+                    let half_h = (BASE_HEIGHT * h) / 2.0;
+
+                    delta.x.abs() <= half_w && delta.y.abs() <= half_h
+                }
+            };
+
+            if is_hovered {
+                found_index = i as i32;
+                break;
+            }
+        }
+
+        found_index
+    }
+
+    fn add_menu_labels_to_areas(
+        &mut self,
+        areas: &mut Vec<TextArea>,
+        font_system: &mut FontSystem,
+    ) {
+        let scale = self.window.scale_factor() as f32;
+        let menu = &self.radial_menu_state;
+
+        // Calculate text positions (World -> Screen)
+        let radius_mid = (menu.radius_inner + menu.radius_outer) / 2.0;
+
+        // Top Label (Freeze)
+        let top_pos_world = menu.center_world + Vec2::new(0.0, radius_mid);
+        let world_offset = radius_mid;
+
+        let top_pos = self.world_to_screen(menu.center_world + Vec2::new(0.0, world_offset));
+        let bot_pos = self.world_to_screen(menu.center_world - Vec2::new(0.0, world_offset));
+
+        let mut create_buf = |text: &str, pos: Vec2, color: Color| {
+            let mut buf = GlyphBuffer::new(font_system, Metrics::new(14.0 * scale, 14.0 * scale));
+            buf.set_text(
+                font_system,
+                text,
+                &Attrs::new()
+                    .family(Family::SansSerif)
+                    .weight(glyphon::Weight::BOLD),
+                Shaping::Advanced,
+            );
+            buf.set_size(font_system, Some(100.0 * scale), None);
+            buf.shape_until_scroll(font_system, false);
+
+            // Center alignment logic
+            let width = buf.layout_runs().map(|run| run.line_w).fold(0.0, f32::max);
+            let left = pos.x * scale - width / 2.0;
+            let top = pos.y * scale - (7.0 * scale); // approx half height
+
+            TextArea {
+                buffer: &buf,
+                left,
+                top,
+                scale: 1.0,
+                bounds: TextBounds {
+                    left: 0,
+                    top: 0,
+                    right: i32::MAX,
+                    bottom: i32::MAX,
+                },
+                default_color: color,
+                custom_glyphs: &[],
+            };
+        };
+    }
+
+    fn freeze_node(&self, index: usize) {
+        log::info!("Freeze Node: {}", self.labels[index]);
+        // TODO: Implement freeze logic
+    }
+
+    fn subgraph_node(&self, index: usize) {
+        log::info!("Create Subgraph from Node: {}", self.labels[index]);
+        // TODO: Implement subgraph logic
     }
 }
