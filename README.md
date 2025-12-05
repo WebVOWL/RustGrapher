@@ -1,7 +1,6 @@
 # WasmGrapher
 
 A library written in Rust to simulate and visualize a 2D [force directed graph](https://en.wikipedia.org/wiki/Force-directed_graph_drawing).
-![plot](./example_images/example.gif)
 
 ## Features
 

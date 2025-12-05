@@ -1,6 +1,9 @@
+use crate::web::prelude::NodeType;
+use crate::web::renderer::init_graph::InitGraph;
+
 use super::renderer::State;
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::EventLoopExtWebSys;
@@ -55,6 +58,8 @@ impl ApplicationHandler<State> for App {
 
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
 
+        let graph = InitGraph::demo();
+
         #[cfg(target_arch = "wasm32")]
         {
             // Run the future asynchronously and use the
@@ -64,7 +69,7 @@ impl ApplicationHandler<State> for App {
                     assert!(
                         proxy
                             .send_event(
-                                State::new(window)
+                                State::new(window, graph)
                                     .await
                                     .expect("Unable to create canvas!!!")
                             )

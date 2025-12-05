@@ -1,4 +1,5 @@
 pub mod events;
+pub mod init_graph;
 mod node_shape;
 pub mod node_types;
 mod vertex_buffer;
@@ -6,7 +7,9 @@ mod vertex_buffer;
 use crate::web::{
     prelude::EVENT_DISPATCHER,
     quadtree::QuadTree,
-    renderer::{events::RenderEvent, node_shape::NodeShape, node_types::NodeType},
+    renderer::{
+        events::RenderEvent, init_graph::InitGraph, node_shape::NodeShape, node_types::NodeType,
+    },
     simulator::{Simulator, components::nodes::Position, ressources::events::SimulatorEvent},
 };
 use glam::Vec2;
@@ -111,7 +114,7 @@ pub struct State {
 }
 
 impl State {
-    pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
+    pub async fn new(window: Arc<Window>, graph: InitGraph) -> anyhow::Result<Self> {
         // Check if we can use WebGPU (as of this writing it's only enabled in some browsers)
         let is_webgpu_enabled = wgpu::util::is_browser_webgpu_supported().await;
 
@@ -228,161 +231,69 @@ impl State {
 
         let hovered_index = -1;
 
-        // TODO: remove test code after implementing ontology loading
-        let mut positions = vec![
-            [50.0, 50.0],
-            [250.0, 50.0],
-            [450.0, 50.0],
-            [250.0, 250.0],
-            [650.0, 450.0],
-            [700.0, 50.0],
-            [850.0, 50.0],
-            [1050.0, 50.0],
-            [1050.0, 250.0],
-            [450.0, 250.0],
-            [650.0, 250.0],
-            [850.0, 250.0],
-            [850.0, 450.0],
-            [1250.0, 250.0],
-            [50.0, 500.0],
-            [1250.0, 150.0],
-            [1250.0, 350.0],
-            [150.0, 150.0],
-            [950.0, 100.0],
-            [350.0, 50.0],
-            [950.0, 25.0],
-            [950.0, 50.0],
-            [550.0, 450.0],
-            [575.0, 50.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-        ];
-        let mut labels = vec![
-            String::from("My class"),
-            String::from("Rdfs class"),
-            String::from("Rdfs resource"),
-            String::from("Loooooooong class 1 2 3 4 5 6 7 8 9"),
-            String::from("Thing"),
-            String::from("Eq1\nEq2\nEq3"),
-            String::from("Deprecated"),
-            String::new(),
-            String::from("Literal"),
-            String::new(),
-            String::from("DisjointUnion 1 2 3 4 5 6 7 8 9"),
-            String::new(),
-            String::new(),
-            String::from("This Datatype is very long"),
-            String::from("AllValues"),
-            String::from("Property1"),
-            String::from("Property2"),
-            String::new(),
-            String::new(),
-            String::from("is a"),
-            String::from("Deprecated"),
-            String::from("External"),
-            String::from("Symmetric"),
-            String::from("Property\nInverseProperty"),
-            String::new(),
-            String::new(),
-        ];
+        let mut labels = graph.labels;
 
-        let mut node_types = vec![
-            NodeType::Class,
-            NodeType::RdfsClass,
-            NodeType::RdfsResource,
-            NodeType::ExternalClass,
-            NodeType::Thing,
-            NodeType::EquivalentClass,
-            NodeType::DeprecatedClass,
-            NodeType::AnonymousClass,
-            NodeType::Literal,
-            NodeType::Complement,
-            NodeType::DisjointUnion,
-            NodeType::Intersection,
-            NodeType::Union,
-            NodeType::Datatype,
-            NodeType::ValuesFrom,
-            NodeType::DatatypeProperty,
-            NodeType::DatatypeProperty,
-            NodeType::SubclassOf,
-            NodeType::DisjointWith,
-            NodeType::RdfProperty,
-            NodeType::DeprecatedProperty,
-            NodeType::ExternalProperty,
-            NodeType::ObjectProperty,
-            NodeType::InverseProperty,
-            NodeType::NoDraw,
-            NodeType::NoDraw,
-        ];
+        let mut node_types = graph.node_types;
 
-        let mut node_shapes = vec![
-            NodeShape::Circle { r: 1.0 },
-            NodeShape::Circle { r: 1.0 },
-            NodeShape::Circle { r: 1.0 },
-            NodeShape::Circle { r: 1.25 },
-            NodeShape::Circle { r: 0.8 },
-            NodeShape::Circle { r: 1.2 },
-            NodeShape::Circle { r: 1.1 },
-            NodeShape::Circle { r: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Circle { r: 1.0 },
-            NodeShape::Circle { r: 1.0 },
-            NodeShape::Circle { r: 1.0 },
-            NodeShape::Circle { r: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Rectangle { w: 0.75, h: 1.0 },
-            NodeShape::Rectangle { w: 0.6, h: 1.0 },
-            NodeShape::Rectangle { w: 0.8, h: 1.0 },
-            NodeShape::Rectangle { w: 0.8, h: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-            NodeShape::Rectangle { w: 1.0, h: 1.0 },
-        ];
+        let mut positions = vec![];
 
-        let mut edges = vec![
-            [0, 14, 1],
-            [13, 15, 8],
-            [8, 16, 13],
-            [0, 17, 3],
-            [9, 18, 12],
-            [1, 19, 2],
-            [10, 24, 11],
-            [11, 25, 12],
-            [6, 20, 7],
-            [6, 21, 7],
-            [4, 22, 4],
-            [2, 23, 5],
-            [5, 23, 2],
-        ];
+        let mut node_shapes = vec![];
+        for (i, node_type) in node_types.iter().enumerate() {
+            match node_type {
+                // Circle
+                NodeType::Class
+                | NodeType::ExternalClass
+                | NodeType::EquivalentClass
+                | NodeType::Union
+                | NodeType::DisjointUnion
+                | NodeType::Intersection
+                | NodeType::Complement
+                | NodeType::DeprecatedClass
+                | NodeType::AnonymousClass
+                | NodeType::RdfsClass
+                | NodeType::RdfsResource
+                | NodeType::NoDraw => {
+                    node_shapes.push(NodeShape::Circle { r: 1.0 });
+                }
+                NodeType::Thing => {
+                    node_shapes.push(NodeShape::Circle { r: 0.7 });
+                }
+                // Rectangle
+                NodeType::Literal
+                | NodeType::Datatype
+                | NodeType::ObjectProperty
+                | NodeType::DatatypeProperty
+                | NodeType::SubclassOf
+                | NodeType::InverseProperty
+                | NodeType::DisjointWith
+                | NodeType::RdfProperty
+                | NodeType::DeprecatedProperty
+                | NodeType::ExternalProperty
+                | NodeType::ValuesFrom => {
+                    node_shapes.push(NodeShape::Rectangle { w: 1.0, h: 1.0 });
+                }
+            }
+            positions.push([
+                f32::fract(f32::sin(i as f32) * 12345.6789),
+                f32::fract(f32::sin(i as f32) * 98765.4321),
+            ]);
+        }
+        if positions.len() == 0 {
+            positions.push([0.0, 0.0]);
+            labels.push("".to_string());
+            node_shapes.push(NodeShape::Circle { r: 0.0 });
+            node_types.push(NodeType::NoDraw);
+        }
 
-        // TODO: remove 'benchmarks'
-        // for i in 0..5000 {
-        //     positions.push([0.0, 0.1 * i as f32]);
-        //     labels.push(format!("{}", i));
-        //     node_types.push(NodeType::Class);
-        //     node_shapes.push(NodeShape::Circle { r: 1.0 });
-        // }
+        let edges = if graph.edges.len() > 0 {
+            graph.edges
+        } else {
+            vec![[0, 0, 0]]
+        };
 
-        // let mut edges: [[usize; 3]; 5000] = [[42; 3]; 5000];
-        // for i in 0..5000 {
-        //     edges[i] = [i + 2, i % 500, i];
-        // }
+        let cardinalities = graph.cardinalities;
 
-        let cardinalities: Vec<(u32, (String, Option<String>))> = vec![
-            (0, ("∀".to_string(), None)),
-            (8, ("1".to_string(), None)),
-            (1, ("1".to_string(), Some("10".to_string()))),
-            (10, ("5".to_string(), Some("10".to_string()))),
-        ];
-
-        let mut characteristics = HashMap::new();
-        characteristics.insert(21, "transitive".to_string());
-        characteristics.insert(23, "functional\ninverse functional".to_string());
+        let mut characteristics = graph.characteristics;
 
         // FontSystem instance for text measurement
         let mut font_system =
@@ -448,7 +359,7 @@ impl State {
                     }
                     _ => {
                         max_lines = 2;
-                        capped_width *= *r * 2.0;
+                        capped_width *= *r * 2.0 - 0.1;
                     }
                 },
                 None => {}
@@ -932,7 +843,6 @@ impl State {
 
     // Initialize glyphon resources and create one text buffer per node.
     fn init_glyphon(&mut self) {
-        // TODO: Update handling of text overflow to use left alignment, and ellipses at end of string
         if self.font_system.is_some() {
             return; // already initialized
         }
@@ -1801,7 +1711,6 @@ impl State {
 
     pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
         match (code, is_pressed) {
-            (KeyCode::Escape, true) => event_loop.exit(),
             (KeyCode::Space, true) => {
                 self.paused = !self.paused;
                 self.window.request_redraw();
