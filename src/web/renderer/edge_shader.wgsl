@@ -27,10 +27,12 @@ struct VertOut {
     @interpolate(flat) @location(10) v_hovered: u32,
 };
 
+// Required to be 16-byte aligned by WebGL
 struct ViewUniforms {
     resolution: vec2<f32>,
     pan: vec2<f32>,
     zoom: f32,
+    _padding: vec2<f32>
 };
 
 @group(0) @binding(0)
