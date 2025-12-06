@@ -1,7 +1,7 @@
 //! Components which make up a node
 
 use glam::Vec2;
-use specs::{Component, NullStorage, VecStorage};
+use specs::{Component, VecStorage};
 
 /// The position of a node.
 #[derive(Component, Default)]

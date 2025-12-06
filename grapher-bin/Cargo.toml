@@ -1,0 +1,17 @@
+[package]
+    authors=["TheRealMorgenfrue"]
+    description="Demonstration of WasmGrapher running native"
+    edition="2024"
+    name="grapher-bin"
+    readme="README.md"
+    repository="https://github.com/WebVOWL/WasmGrapher"
+    version="0.1.0"
+
+
+[dependencies]
+    env_logger="0.11.0"
+
+    [dependencies.grapher]
+        default-features=false
+        features=["native"]
+        path="../"

@@ -1,9 +1,8 @@
-use crate::web::prelude::NodeType;
-use crate::web::renderer::init_graph::InitGraph;
+use crate::renderer::init_graph::InitGraph;
 
 use super::renderer::State;
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::EventLoopExtWebSys;
@@ -59,6 +58,12 @@ impl ApplicationHandler<State> for App {
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
 
         let graph = InitGraph::demo();
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // If we are not on web we can use pollster to await the state
+            self.state = Some(pollster::block_on(State::new(window, graph)).unwrap());
+        }
 
         #[cfg(target_arch = "wasm32")]
         {
@@ -140,7 +145,7 @@ impl ApplicationHandler<State> for App {
                         ..
                     },
                 ..
-            } => state.handle_key(event_loop, code, key_state.is_pressed()),
+            } => state.handle_key(code, key_state.is_pressed()),
             WindowEvent::MouseInput {
                 button,
                 state: button_state,
@@ -156,10 +161,13 @@ impl ApplicationHandler<State> for App {
 
 pub fn run() -> anyhow::Result<()> {
     let event_loop: EventLoop<State> = EventLoop::with_user_event().build()?;
-    let app = App::new(
+    let mut app = App::new(
         #[cfg(target_arch = "wasm32")]
         &event_loop,
     );
+
+    #[cfg(not(target_arch = "wasm32"))]
+    event_loop.run_app(&mut app)?;
 
     #[cfg(target_arch = "wasm32")]
     event_loop.spawn_app(app);

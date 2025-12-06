@@ -29,12 +29,6 @@ pub struct QuadTreeTheta(pub f32);
 /// Freeze nodes when their velocity falls below this number.
 pub struct FreezeThreshold(pub f32);
 
-/// Simulation world size.
-pub struct WorldSize {
-    pub width: u32,
-    pub height: u32,
-}
-
 /// The current location of the mouse cursor.
 #[derive(Default)]
 pub struct CursorPosition(pub Vec2);
@@ -88,15 +82,6 @@ impl Default for QuadTreeTheta {
 impl Default for FreezeThreshold {
     fn default() -> Self {
         Self(10.0)
-    }
-}
-
-impl Default for WorldSize {
-    fn default() -> Self {
-        Self {
-            width: 1280,
-            height: 720,
-        }
     }
 }
 

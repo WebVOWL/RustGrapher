@@ -11,9 +11,9 @@
         "editor.defaultFormatter": "rust-lang.rust-analyzer"
     },
     "rust-analyzer.cargo.features": "all",
-    "rust-analyzer.cargo.target": "wasm32-unknown-unknown", // It is not possible to get completions for multiple targets at the same time.
+    "rust-analyzer.cargo.target": "wasm32-unknown-unknown", //"x86_64-unknown-linux-gnu",// It is not possible to get completions for multiple targets at the same time.
     "rust-analyzer.cargo.extraEnv": {
-        "RUSTFLAGS": "-Clinker=clang -Clink-arg=-fuse-ld=lld"
+        "RUSTFLAGS": "-Clinker=clang -Clink-arg=-fuse-ld=mold"
     },
     "[markdown]": {
         "files.trimTrailingWhitespace": false,

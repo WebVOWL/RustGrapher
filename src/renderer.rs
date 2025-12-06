@@ -4,7 +4,7 @@ mod node_shape;
 pub mod node_types;
 mod vertex_buffer;
 
-use crate::web::{
+use crate::{
     prelude::EVENT_DISPATCHER,
     quadtree::QuadTree,
     renderer::{
@@ -23,7 +23,7 @@ use std::{cmp::min, collections::HashMap, sync::Arc};
 use vertex_buffer::{MenuUniforms, NodeInstance, VERTICES, Vertex, ViewUniforms};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
-use web_time::{Instant, SystemTime};
+use web_time::Instant;
 use wgpu::util::DeviceExt;
 use winit::event::MouseButton;
 #[cfg(target_arch = "wasm32")]
@@ -298,7 +298,7 @@ impl State {
         // FontSystem instance for text measurement
         let mut font_system =
             FontSystem::new_with_fonts(core::iter::once(glyphon::fontdb::Source::Binary(
-                Arc::new(include_bytes!("../../assets/DejaVuSans.ttf").to_vec()),
+                Arc::new(include_bytes!("../assets/DejaVuSans.ttf").to_vec()),
             )));
         font_system.db_mut().set_sans_serif_family("DejaVu Sans");
 
@@ -848,7 +848,7 @@ impl State {
         }
 
         // Embed font bytes into the binary
-        const DEFAULT_FONT_BYTES: &'static [u8] = include_bytes!("../../assets/DejaVuSans.ttf");
+        const DEFAULT_FONT_BYTES: &'static [u8] = include_bytes!("../assets/DejaVuSans.ttf");
 
         let mut font_system = FontSystem::new_with_fonts(core::iter::once(
             glyphon::fontdb::Source::Binary(Arc::new(DEFAULT_FONT_BYTES.to_vec())),
@@ -1104,13 +1104,6 @@ impl State {
             if self.font_system.is_none() {
                 self.init_glyphon();
             }
-
-            EVENT_DISPATCHER.sim_chan.write().unwrap().single_write(
-                SimulatorEvent::WindowResized {
-                    width: width,
-                    height: height,
-                },
-            );
         }
     }
 
@@ -1709,7 +1702,7 @@ impl State {
         }
     }
 
-    pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
+    pub fn handle_key(&mut self, code: KeyCode, is_pressed: bool) {
         match (code, is_pressed) {
             (KeyCode::Space, true) => {
                 self.paused = !self.paused;

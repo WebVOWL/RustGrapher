@@ -1,27 +1,31 @@
-//! # Example
-//! ```no_run
-//!use grapher::native::renderer::Renderer;
-//!use grapher::native::simulator::SimulatorBuilder;
-//!use petgraph::Directed;
-//!
-//!let mut rng = rand::thread_rng();
-//!let graph: petgraph::Graph<(), (), Directed> =
-//!    petgraph_gen::barabasi_albert_graph(&mut rng, 1000, 1, None);
-//!
-//!let simulator = SimulatorBuilder::new()
-//!    .delta_time(0.01)
-//!    .freeze_threshold(-1.0)
-//!    .build(graph.into());
-//!
-//!let renderer = Renderer::new(simulator);
-//!renderer.create_window();
-//! ```
-
 #![allow(dead_code)]
 #![allow(unused)]
 
-// #[cfg(target_arch = "x86_64")]
-// pub mod native;
+mod app;
+mod event_dispatcher;
+mod quadtree;
+mod renderer;
+mod simulator;
 
-// #[cfg(target_arch = "wasm32")]
-pub mod web;
+#[cfg(target_arch = "wasm32")]
+pub use app::init_render;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use app::run;
+
+/// Exports all the core types of the library.
+pub mod prelude {
+    use crate::event_dispatcher::EventDispatcher;
+    pub use crate::renderer::events::RenderEvent;
+    pub use crate::renderer::node_types::NodeType;
+    pub use crate::simulator::ressources::events::SimulatorEvent;
+    pub use crate::simulator::ressources::simulator_vars::{
+        Damping, DeltaTime, FreezeThreshold, GravityForce, QuadTreeTheta, RepelForce,
+        SpringNeutralLength, SpringStiffness,
+    };
+    use std::sync::LazyLock;
+
+    /// The global event handler for RustGrapher.
+    pub static EVENT_DISPATCHER: LazyLock<EventDispatcher> =
+        LazyLock::new(|| EventDispatcher::new());
+}

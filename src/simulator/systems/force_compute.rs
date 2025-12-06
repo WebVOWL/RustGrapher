@@ -1,4 +1,4 @@
-use crate::web::{
+use crate::{
     quadtree::QuadTree,
     simulator::{
         components::{
@@ -8,13 +8,13 @@ use crate::web::{
         },
         ressources::simulator_vars::{
             DeltaTime, GravityForce, QuadTreeTheta, RepelForce, SpringNeutralLength,
-            SpringStiffness, WorldSize,
+            SpringStiffness,
         },
     },
 };
 use glam::Vec2;
 use rayon::prelude::*;
-use specs::{Entities, Join, ParJoin, Read, ReadExpect, ReadStorage, System, WriteStorage};
+use specs::{Entities, ParJoin, Read, ReadExpect, ReadStorage, System, WriteStorage};
 
 pub struct ComputeNodeForce;
 
@@ -107,11 +107,10 @@ impl<'a> System<'a> for ComputeGravityForce {
         ReadStorage<'a, NodeState>,
         WriteStorage<'a, NodeForces>,
         Read<'a, GravityForce>,
-        Read<'a, WorldSize>,
     );
     fn run(
         &mut self,
-        (entities, positions, masses, node_states, mut forces, gravity_force, world_size): Self::SystemData,
+        (entities, positions, masses, node_states, mut forces, gravity_force): Self::SystemData,
     ) {
         (&entities, &positions, &masses, &mut forces, &node_states)
             .par_join()
@@ -177,7 +176,6 @@ impl<'a> System<'a> for ComputeEdgeForces {
     type SystemData = (
         Entities<'a>,
         ReadStorage<'a, Connects>,
-        ReadStorage<'a, NodeState>,
         WriteStorage<'a, NodeForces>,
         ReadStorage<'a, Position>,
         Read<'a, SpringStiffness>,
@@ -189,7 +187,6 @@ impl<'a> System<'a> for ComputeEdgeForces {
         (
             entities,
             connections,
-            node_states,
             mut forces,
             positions,
             spring_stiffness,
@@ -198,39 +195,38 @@ impl<'a> System<'a> for ComputeEdgeForces {
     ) {
         let positions_storage = &positions;
 
-        let force_updates: Vec<(specs::Entity, Vec2)> =
-            (&entities, &positions, &connections, &node_states)
-                .par_join()
-                .fold(
-                    || Vec::new(),
-                    |mut acc, (entity, pos, connects, state)| {
-                        let rb1 = entity;
-                        for rb2 in &connects.targets {
-                            // Look up the neighbor's position
-                            if let Some(pos2_comp) = positions_storage.get(*rb2) {
-                                let pos2 = pos2_comp.0;
-                                let direction_vec = pos2 - pos.0;
+        let force_updates: Vec<(specs::Entity, Vec2)> = (&entities, &positions, &connections)
+            .par_join()
+            .fold(
+                || Vec::new(),
+                |mut acc, (entity, pos, connects)| {
+                    let rb1 = entity;
+                    for rb2 in &connects.targets {
+                        // Look up the neighbor's position
+                        if let Some(pos2_comp) = positions_storage.get(*rb2) {
+                            let pos2 = pos2_comp.0;
+                            let direction_vec = pos2 - pos.0;
 
-                                let force_magnitude = spring_stiffness.0
-                                    * (direction_vec.length() - spring_neutral_length.0);
+                            let force_magnitude = spring_stiffness.0
+                                * (direction_vec.length() - spring_neutral_length.0);
 
-                                let spring_force =
-                                    direction_vec.normalize_or(Vec2::ZERO) * -force_magnitude;
+                            let spring_force =
+                                direction_vec.normalize_or(Vec2::ZERO) * -force_magnitude;
 
-                                acc.push((rb1, -spring_force));
-                                acc.push((*rb2, spring_force));
-                            }
+                            acc.push((rb1, -spring_force));
+                            acc.push((*rb2, spring_force));
                         }
-                        acc
-                    },
-                )
-                .reduce(
-                    || Vec::new(),
-                    |mut a, b| {
-                        a.extend(b);
-                        a
-                    },
-                );
+                    }
+                    acc
+                },
+            )
+            .reduce(
+                || Vec::new(),
+                |mut a, b| {
+                    a.extend(b);
+                    a
+                },
+            );
 
         for (entity, force_vec) in force_updates {
             if let Some(force_comp) = forces.get_mut(entity) {
