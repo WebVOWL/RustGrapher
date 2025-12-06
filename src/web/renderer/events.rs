@@ -5,10 +5,10 @@ use super::ElementType;
 /// Describes an event received by a render [`State`].
 #[derive(Clone, PartialEq)]
 pub enum RenderEvent {
-    /// Hide a [`ElementType`] during rendering.
+    /// Hide an [`ElementType`] during rendering.
     ElementFiltered(ElementType),
 
-    /// Show a [`ElementType`] during rendering.
+    /// Show an [`ElementType`] during rendering.
     ElementShown(ElementType),
 
     /// Pause graph simulation.
