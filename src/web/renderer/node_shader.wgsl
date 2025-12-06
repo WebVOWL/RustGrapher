@@ -1,7 +1,7 @@
 struct VertIn {
     @location(0) quad_pos: vec2<f32>,         // [-1..1] quad corner in local space
     @location(1) inst_pos: vec2<f32>,         // per-instance node position in pixels
-    @location(2) elements: u32,              // Type of node used when drawing
+    @location(2) element_type: u32,           // Type of node used when drawing
     @location(3) shape: u32,                  // The shape of the node, 0: Circle, 1: Rectangle
     @location(4) shape_dimensions: vec2<f32>, // The radius of a circle or the width and height of a rectangle
     @location(5) hovered: u32,                // 1 when hovered, 0 otherwise
@@ -10,7 +10,7 @@ struct VertIn {
 struct VertOut {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) v_uv: vec2<f32>, // 0..1 inside quad
-    @interpolate(flat) @location(1) v_elements: u32,
+    @interpolate(flat) @location(1) v_element_type: u32,
     @interpolate(flat) @location(2) v_shape: u32,
     @location(3) v_shape_dimensions: vec2<f32>,
     @interpolate(flat) @location(4) v_hovered: u32,
@@ -61,7 +61,7 @@ fn vs_node_main(
     let aspect = vec2<f32>(in.quad_pos.x, in.quad_pos.y);
     out.v_uv = aspect * 0.5 + vec2<f32>(0.5, 0.5);
 
-    out.v_elements = in.elements;
+    out.v_element_type = in.element_type;
     out.v_shape = in.shape;
     out.v_shape_dimensions = in.shape_dimensions;
     out.v_hovered = in.hovered;
@@ -92,7 +92,7 @@ const HIGHLIGHTED_COLOR = vec3<f32>(1.0, 0.0, 0.0);
 
 @fragment
 fn fs_node_main(in: VertOut) -> @location(0) vec4<f32> {
-    return draw_node_by_type(in.v_elements, in.v_uv, in.v_shape_dimensions, in.v_hovered);
+    return draw_node_by_type(in.v_element_type, in.v_uv, in.v_shape_dimensions, in.v_hovered);
 }
 
 fn draw_class(v_uv: vec2<f32>, hovered: u32) -> vec4<f32> {
@@ -787,9 +787,9 @@ fn draw_disjoint_with(v_uv: vec2<f32>, shape_dimensions: vec2<f32>, hovered: u32
     return vec4<f32>(col, alpha);
 }
 
-fn draw_node_by_type(elements: u32, v_uv: vec2<f32>, shape_dimensions: vec2<f32>, hovered: u32) -> vec4<f32> {
+fn draw_node_by_type(element_type: u32, v_uv: vec2<f32>, shape_dimensions: vec2<f32>, hovered: u32) -> vec4<f32> {
     // Documentation is available in ELEMENT_RANGES.md
-    switch elements {
+    switch element_type {
             // Reserved
             case 0: {return vec4<f32>(0.0);}
             // RDF edges
