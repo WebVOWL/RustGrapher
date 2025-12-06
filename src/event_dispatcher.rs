@@ -1,4 +1,5 @@
-use crate::web::{prelude::SimulatorEvent, renderer::events::RenderEvent};
+use crate::renderer::events::RenderEvent;
+use crate::simulator::ressources::events::SimulatorEvent;
 use specs::shrev::EventChannel;
 use std::sync::{Arc, RwLock};
 

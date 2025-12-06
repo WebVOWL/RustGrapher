@@ -1,8 +1,8 @@
 pub mod components;
 pub mod ressources;
 mod systems;
-use crate::web::prelude::EVENT_DISPATCHER;
-use crate::web::{
+use crate::prelude::EVENT_DISPATCHER;
+use crate::{
     quadtree::{BoundingBox2D, QuadTree},
     simulator::{
         components::{
@@ -15,7 +15,6 @@ use crate::web::{
             simulator_vars::{
                 CursorPosition, Damping, DeltaTime, FreezeThreshold, GravityForce,
                 PointIntersection, QuadTreeTheta, RepelForce, SpringNeutralLength, SpringStiffness,
-                WorldSize,
             },
         },
         systems::{
@@ -33,8 +32,8 @@ use crate::web::{
 use glam::Vec2;
 use rayon::prelude::*;
 use specs::{
-    Builder, Dispatcher, DispatcherBuilder, Entities, Join, LazyUpdate, ParJoin, Read, ReadStorage,
-    ReaderId, System, World, WorldExt, Write, WriteStorage,
+    Builder, Dispatcher, DispatcherBuilder, Join, LazyUpdate, ParJoin, ReadStorage, ReaderId,
+    System, World, WorldExt, Write, WriteStorage,
 };
 use std::collections::HashMap;
 
@@ -124,11 +123,6 @@ impl<'a, 'b> Simulator<'a, 'b> {
                 SimulatorEvent::DampingUpdated(value) => damping.0 = *value,
                 SimulatorEvent::QuadTreeThetaUpdated(value) => quadtree_theta.0 = *value,
                 SimulatorEvent::FreezeThresholdUpdated(value) => freeze_threshold.0 = *value,
-                SimulatorEvent::WindowResized { width, height } => {
-                    let mut world_size = world.fetch_mut::<WorldSize>();
-                    world_size.width = *width;
-                    world_size.height = *height
-                }
                 SimulatorEvent::DragStart(cursor_pos) => {
                     {
                         let mut cursor_position = world.fetch_mut::<CursorPosition>();
@@ -324,7 +318,6 @@ impl SimulatorBuilder {
         world.insert(QuadTreeTheta(self.quadtree_theta));
         world.insert(FreezeThreshold(self.freeze_thresh));
         world.insert(QuadTree::default());
-        world.insert(WorldSize::default());
         world.insert(CursorPosition::default());
         world.insert(PointIntersection::default());
     }

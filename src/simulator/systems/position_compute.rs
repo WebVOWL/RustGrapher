@@ -1,6 +1,6 @@
-use crate::web::simulator::{
+use crate::simulator::{
     components::nodes::{Mass, Position},
-    ressources::simulator_vars::{CursorPosition, PointIntersection, WorldSize},
+    ressources::simulator_vars::{CursorPosition, PointIntersection},
 };
 use glam::Vec2;
 use log::info;
@@ -47,7 +47,6 @@ pub struct DistanceSystemData<'a> {
     entities: Entities<'a>,
     positions: ReadStorage<'a, Position>,
     cursor_position: Read<'a, CursorPosition>,
-    world_size: Read<'a, WorldSize>,
     intersection: Write<'a, PointIntersection>,
     masses: ReadStorage<'a, Mass>,
 }

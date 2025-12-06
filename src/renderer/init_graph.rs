@@ -1,4 +1,4 @@
-use crate::web::prelude::NodeType;
+use crate::prelude::NodeType;
 use std::collections::HashMap;
 
 pub struct InitGraph {

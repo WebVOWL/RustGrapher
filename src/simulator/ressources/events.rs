@@ -32,9 +32,6 @@ pub enum SimulatorEvent {
     /// in future force computations.
     FreezeThresholdUpdated(f32),
 
-    /// The dimensions of the simulated world has changed.
-    WindowResized { width: u32, height: u32 },
-
     /// A node is being dragged.
     DragStart(Vec2),
 

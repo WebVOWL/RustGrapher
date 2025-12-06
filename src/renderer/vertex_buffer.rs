@@ -1,7 +1,7 @@
-use web_sys::js_sys::Math::atan2;
+// use web_sys::js_sys::Math::atan2;
 use wgpu::util::DeviceExt;
 
-use crate::web::renderer::{node_shape::NodeShape, node_types::NodeType};
+use crate::renderer::{node_shape::NodeShape, node_types::NodeType};
 
 // Number of segments to divide each Bézier curve into for strip generation
 const BEZIER_SEGMENTS: usize = 24;
@@ -251,7 +251,8 @@ pub fn build_line_and_arrow_vertices(
             if let NodeShape::Circle { r } = node_shapes[start_idx] {
                 let dx = center[0] - node_center[0];
                 let dy = center[1] - node_center[1];
-                let angle = atan2(dy as f64, dx as f64) as f32;
+                let angle = f32::atan2(dy, dx);
+                // let angle = atan2(dy as f64, dx as f64) as f32;
                 let offset_angle = angle + std::f32::consts::FRAC_PI_2;
                 let offset_x = offset_angle.cos() * radius_pix * 0.5;
                 let offset_y = offset_angle.sin() * radius_pix * 0.5;
@@ -368,7 +369,7 @@ pub fn build_line_and_arrow_vertices(
         let tangent_at_end = normalize(bezier_tangent(start, ctrl, end, 1.0));
 
         // Generate strip vertices
-        let mut first_strip = line_vertices.is_empty();
+        let first_strip = line_vertices.is_empty();
 
         if !first_strip {
             // duplicate previous last to avoid breaks

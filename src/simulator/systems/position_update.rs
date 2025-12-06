@@ -1,7 +1,7 @@
-use crate::web::simulator::{
+use crate::simulator::{
     components::nodes::{NodeState, Position, Velocity},
     ressources::simulator_vars::{
-        CursorPosition, Damping, DeltaTime, FreezeThreshold, PointIntersection, WorldSize,
+        CursorPosition, Damping, DeltaTime, FreezeThreshold, PointIntersection,
     },
 };
 
