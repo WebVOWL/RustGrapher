@@ -801,7 +801,7 @@ fn draw_node_by_type(elements: u32, v_uv: vec2<f32>, shape_dimensions: vec2<f32>
             // RDFS edges
             case 25000: {return draw_datatype(v_uv, shape_dimensions, hovered);}
             case 25001: {return draw_property(v_uv, shape_dimensions, vec3<f32>(1.0), hovered);}
-            // OWL
+            // OWL nodes
             case 30000: {return draw_anonymous_class(v_uv, hovered);}
             case 30001: {return draw_class(v_uv, hovered);}
             case 30002: {return draw_complement(v_uv, hovered);}
@@ -812,6 +812,7 @@ fn draw_node_by_type(elements: u32, v_uv: vec2<f32>, shape_dimensions: vec2<f32>
             case 30007: {return draw_intersection_of(v_uv, hovered);}
             case 30008: {return draw_thing(v_uv, hovered);}
             case 30009: {return draw_union(v_uv, hovered);}
+            // OWL edges
             case 35000: {return draw_property(v_uv, shape_dimensions, DATATYPE_PROPERTY_COLOR, hovered);}
             case 35001: {return draw_disjoint_with(v_uv, shape_dimensions, hovered);}
             case 35002: {return draw_property(v_uv, shape_dimensions, DEPRECATED_COLOR, hovered);}
