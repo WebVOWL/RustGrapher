@@ -1,14 +1,19 @@
+pub mod elements;
 pub mod events;
-pub mod init_graph;
 mod node_shape;
-pub mod node_types;
 mod vertex_buffer;
 
 use crate::web::{
+    graph_data::GraphDisplayData,
     prelude::EVENT_DISPATCHER,
     quadtree::QuadTree,
     renderer::{
-        events::RenderEvent, init_graph::InitGraph, node_shape::NodeShape, node_types::NodeType,
+        elements::{
+            characteristic::Characteristic, element_type::ElementType, generic::*, owl::*, rdf::*,
+            rdfs::*,
+        },
+        events::RenderEvent,
+        node_shape::NodeShape,
     },
     simulator::{Simulator, components::nodes::Position, ressources::events::SimulatorEvent},
 };
@@ -71,7 +76,7 @@ pub struct State {
     labels: Vec<String>,
     edges: Vec<[usize; 3]>,
     solitary_edges: Vec<[usize; 3]>,
-    node_types: Vec<NodeType>,
+    node_types: Vec<ElementType>,
     node_shapes: Vec<NodeShape>,
     cardinalities: Vec<(u32, (String, Option<String>))>,
     characteristics: HashMap<usize, String>,
@@ -114,7 +119,7 @@ pub struct State {
 }
 
 impl State {
-    pub async fn new(window: Arc<Window>, graph: InitGraph) -> anyhow::Result<Self> {
+    pub async fn new(window: Arc<Window>, graph: GraphDisplayData) -> anyhow::Result<Self> {
         // Check if we can use WebGPU (as of this writing it's only enabled in some browsers)
         let is_webgpu_enabled = wgpu::util::is_browser_webgpu_supported().await;
 
@@ -233,45 +238,63 @@ impl State {
 
         let mut labels = graph.labels;
 
-        let mut node_types = graph.node_types;
+        let mut elements = graph.elements;
 
         let mut positions = vec![];
 
         let mut node_shapes = vec![];
-        for (i, node_type) in node_types.iter().enumerate() {
-            match node_type {
-                // Circle
-                NodeType::Class
-                | NodeType::ExternalClass
-                | NodeType::EquivalentClass
-                | NodeType::Union
-                | NodeType::DisjointUnion
-                | NodeType::Intersection
-                | NodeType::Complement
-                | NodeType::DeprecatedClass
-                | NodeType::AnonymousClass
-                | NodeType::RdfsClass
-                | NodeType::RdfsResource
-                | NodeType::NoDraw => {
+        for (i, element) in elements.iter().enumerate() {
+            match element {
+                ElementType::Owl(OwlType::Node(node)) => match node {
+                    OwlNode::Class
+                    | OwlNode::AnonymousClass
+                    | OwlNode::Complement
+                    | OwlNode::DeprecatedClass
+                    | OwlNode::ExternalClass
+                    | OwlNode::DisjointUnion
+                    | OwlNode::EquivalentClass
+                    | OwlNode::IntersectionOf
+                    | OwlNode::UnionOf => {
+                        node_shapes.push(NodeShape::Circle { r: 1.0 });
+                    }
+                    OwlNode::Thing => {
+                        node_shapes.push(NodeShape::Circle { r: 0.7 });
+                    }
+                },
+                ElementType::Owl(OwlType::Edge(edge)) => match edge {
+                    OwlEdge::DatatypeProperty
+                    | OwlEdge::ObjectProperty
+                    | OwlEdge::DisjointWith
+                    | OwlEdge::DeprecatedProperty
+                    | OwlEdge::ExternalProperty
+                    | OwlEdge::InverseOf
+                    | OwlEdge::ValuesFrom => {
+                        node_shapes.push(NodeShape::Rectangle { w: 1.0, h: 1.0 });
+                    }
+                },
+                ElementType::Rdfs(RdfsType::Node(node)) => match node {
+                    RdfsNode::Class | RdfsNode::Resource => {
+                        node_shapes.push(NodeShape::Circle { r: 1.0 });
+                    }
+                    RdfsNode::Literal => {
+                        node_shapes.push(NodeShape::Rectangle { w: 1.0, h: 1.0 });
+                    }
+                },
+                ElementType::Rdfs(RdfsType::Edge(edge)) => match edge {
+                    RdfsEdge::Datatype | RdfsEdge::SubclassOf => {
+                        node_shapes.push(NodeShape::Rectangle { w: 1.0, h: 1.0 });
+                    }
+                },
+                // ElementType::Rdf(RdfType::Node(node)) => todo!(),
+                ElementType::Rdf(RdfType::Edge(edge)) => match edge {
+                    RdfEdge::RdfProperty => {
+                        node_shapes.push(NodeShape::Rectangle { w: 1.0, h: 1.0 });
+                    }
+                },
+                ElementType::NoDraw => {
                     node_shapes.push(NodeShape::Circle { r: 1.0 });
                 }
-                NodeType::Thing => {
-                    node_shapes.push(NodeShape::Circle { r: 0.7 });
-                }
-                // Rectangle
-                NodeType::Literal
-                | NodeType::Datatype
-                | NodeType::ObjectProperty
-                | NodeType::DatatypeProperty
-                | NodeType::SubclassOf
-                | NodeType::InverseProperty
-                | NodeType::DisjointWith
-                | NodeType::RdfProperty
-                | NodeType::DeprecatedProperty
-                | NodeType::ExternalProperty
-                | NodeType::ValuesFrom => {
-                    node_shapes.push(NodeShape::Rectangle { w: 1.0, h: 1.0 });
-                }
+                ElementType::Generic(generic_type) => todo!(),
             }
             positions.push([
                 f32::fract(f32::sin(i as f32) * 12345.6789),
@@ -282,7 +305,7 @@ impl State {
             positions.push([0.0, 0.0]);
             labels.push("".to_string());
             node_shapes.push(NodeShape::Circle { r: 0.0 });
-            node_types.push(NodeType::NoDraw);
+            elements.push(ElementType::NoDraw);
         }
 
         let edges = if graph.edges.len() > 0 {
@@ -308,7 +331,7 @@ impl State {
         // iterate over labels and update the width of corresponding rectangle nodes
         for (i, label_text) in labels.clone().iter().enumerate() {
             // Set fixed size for disjoint property
-            if let Some(NodeType::DisjointWith) = node_types.get(i) {
+            if let Some(ElementType::Owl(OwlType::Edge(OwlEdge::DisjointWith))) = elements.get(i) {
                 node_shapes[i] = NodeShape::Rectangle { w: 0.75, h: 0.75 };
                 continue;
             }
@@ -342,21 +365,30 @@ impl State {
                 Some(NodeShape::Rectangle { w, .. }) => {
                     let new_width_pixels = text_width;
                     *w = f32::min(new_width_pixels / (capped_width * 2.0) * 1.05, 2.0);
-                    if matches!(node_types[i], NodeType::InverseProperty) {
+                    if matches!(
+                        elements[i],
+                        ElementType::Owl(OwlType::Edge(OwlEdge::InverseOf))
+                    ) {
                         continue;
                     }
                     max_lines = 1;
                     capped_width *= 4.0;
                 }
-                Some(NodeShape::Circle { r }) => match node_types[i] {
-                    NodeType::EquivalentClass => continue,
-                    NodeType::Complement
-                    | NodeType::DisjointUnion
-                    | NodeType::Union
-                    | NodeType::Intersection => {
-                        max_lines = 1;
-                        capped_width = 79.0 * scale;
-                    }
+                Some(NodeShape::Circle { r }) => match elements[i] {
+                    ElementType::Owl(OwlType::Node(node)) => match node {
+                        OwlNode::EquivalentClass => continue,
+                        OwlNode::Complement
+                        | OwlNode::DisjointUnion
+                        | OwlNode::UnionOf
+                        | OwlNode::IntersectionOf => {
+                            max_lines = 1;
+                            capped_width = 79.0 * scale;
+                        }
+                        _ => {
+                            max_lines = 2;
+                            capped_width *= *r * 2.0 - 0.1;
+                        }
+                    },
                     _ => {
                         max_lines = 2;
                         capped_width *= *r * 2.0 - 0.1;
@@ -416,7 +448,7 @@ impl State {
         let node_instance_buffer = vertex_buffer::create_node_instance_buffer(
             &device,
             &positions,
-            &node_types,
+            &elements,
             &node_shapes,
             &hovered_index,
         );
@@ -500,7 +532,7 @@ impl State {
                 &edges,
                 &positions,
                 &node_shapes,
-                &node_types,
+                &elements,
                 1.0,
                 &hovered_index,
             );
@@ -615,7 +647,10 @@ impl State {
                 .unwrap()
                 .len();
             if num_neighbors < 2
-                || (matches!(node_types[*center], NodeType::InverseProperty) && num_neighbors <= 2)
+                || (matches!(
+                    elements[*center],
+                    ElementType::Owl(OwlType::Edge(OwlEdge::InverseOf))
+                ) && num_neighbors <= 2)
             {
                 solitary_edges.push([*start, *center, *end]);
             }
@@ -779,7 +814,7 @@ impl State {
             labels,
             edges: edges.to_vec(),
             solitary_edges,
-            node_types: node_types.to_vec(),
+            node_types: elements.to_vec(),
             node_shapes,
             cardinalities,
             characteristics,
@@ -877,7 +912,7 @@ impl State {
                 NodeShape::Rectangle { w, .. } => {
                     // Calculate physical pixel width from shape's width multiplier
                     let mut height = match self.node_types[i] {
-                        NodeType::InverseProperty => 48.0,
+                        ElementType::Owl(OwlType::Edge(OwlEdge::InverseOf)) => 48.0,
                         _ => 12.0,
                     };
                     if self.characteristics.contains_key(&i) {
@@ -887,24 +922,33 @@ impl State {
                 }
                 NodeShape::Circle { r } => {
                     let mut height = match self.node_types[i] {
-                        NodeType::ExternalClass
-                        | NodeType::DeprecatedClass
-                        | NodeType::EquivalentClass
-                        | NodeType::DisjointWith
-                        | NodeType::Union
-                        | NodeType::DisjointUnion
-                        | NodeType::Complement
-                        | NodeType::Intersection => 36.0,
+                        ElementType::Owl(OwlType::Node(node)) => match node {
+                            OwlNode::ExternalClass
+                            | OwlNode::DeprecatedClass
+                            | OwlNode::Complement
+                            | OwlNode::EquivalentClass
+                            | OwlNode::DisjointUnion
+                            | OwlNode::IntersectionOf
+                            | OwlNode::UnionOf => 36.0,
+                            _ => 24.0,
+                        },
+                        ElementType::Owl(OwlType::Edge(edge)) => match edge {
+                            OwlEdge::DisjointWith => 36.0,
+                            _ => 24.0,
+                        },
                         _ => 24.0,
                     };
                     if self.characteristics.contains_key(&i) {
                         height += 24.0;
                     };
                     let width = match self.node_types[i] {
-                        NodeType::Union
-                        | NodeType::DisjointUnion
-                        | NodeType::Complement
-                        | NodeType::Intersection => 75.0,
+                        ElementType::Owl(OwlType::Node(node)) => match node {
+                            OwlNode::UnionOf
+                            | OwlNode::DisjointUnion
+                            | OwlNode::Complement
+                            | OwlNode::IntersectionOf => 75.0,
+                            _ => 85.0,
+                        },
                         _ => 85.0,
                     };
                     (width * scale * r, height * scale)
@@ -912,105 +956,125 @@ impl State {
             };
             buf.set_size(&mut font_system, Some(label_width), Some(label_height));
             buf.set_wrap(&mut font_system, glyphon::Wrap::Word);
-            // sample label using the NodeType
+            // sample label using the ElementType
             let attrs = &Attrs::new().family(Family::SansSerif);
             let node_type_metrics = Metrics::new(font_px - 3.0, line_px);
             let mut owned_spans: Vec<(String, Attrs)> = Vec::new();
             match self.node_types[i] {
-                NodeType::EquivalentClass => {
-                    // TODO: Update when handling equivalent classes from ontology
-                    let mut parts: Vec<&str> = label.split('\n').collect();
-                    let label1 = parts.get(0).map_or("", |v| *v).to_string();
-                    let eq_labels = parts.split_off(1);
-                    if !eq_labels.is_empty() {
-                        owned_spans.push((label1, attrs.clone()));
-                        owned_spans.push(("\n".to_string(), attrs.clone()));
-                        for (idx, eq) in eq_labels.iter().enumerate() {
-                            let mut s = eq.to_string();
-                            if idx + 1 < eq_labels.len() {
-                                s.push_str(", ");
+                ElementType::Owl(OwlType::Node(node)) => {
+                    match node {
+                        OwlNode::EquivalentClass => {
+                            // TODO: Update when handling equivalent classes from ontology
+                            let mut parts: Vec<&str> = label.split('\n').collect();
+                            let label1 = parts.get(0).map_or("", |v| *v).to_string();
+                            let eq_labels = parts.split_off(1);
+                            if !eq_labels.is_empty() {
+                                owned_spans.push((label1, attrs.clone()));
+                                owned_spans.push(("\n".to_string(), attrs.clone()));
+                                for (idx, eq) in eq_labels.iter().enumerate() {
+                                    let mut s = eq.to_string();
+                                    if idx + 1 < eq_labels.len() {
+                                        s.push_str(", ");
+                                    }
+                                    owned_spans.push((s, attrs.clone()));
+                                }
+                            } else {
+                                owned_spans.push((label1, attrs.clone()));
                             }
-                            owned_spans.push((s, attrs.clone()));
                         }
-                    } else {
-                        owned_spans.push((label1, attrs.clone()));
+                        OwlNode::ExternalClass => {
+                            owned_spans.push((label.to_string(), attrs.clone()));
+                            owned_spans.push((
+                                "\n(external)".to_string(),
+                                attrs.clone().metrics(node_type_metrics),
+                            ));
+                        }
+                        OwlNode::DeprecatedClass => {
+                            owned_spans.push((label.to_string(), attrs.clone()));
+                            owned_spans.push((
+                                "\n(deprecated)".to_string(),
+                                attrs.clone().metrics(node_type_metrics),
+                            ));
+                        }
+                        OwlNode::Thing => {
+                            owned_spans.push(("Thing".to_string(), attrs.clone()));
+                        }
+                        OwlNode::Complement => {
+                            owned_spans.push((label.to_string(), attrs.clone()));
+                            owned_spans.push(("\n\n¬".to_string(), attrs.clone()));
+                        }
+                        OwlNode::DisjointUnion => {
+                            owned_spans.push((label.to_string(), attrs.clone()));
+                            owned_spans.push(("\n\n1".to_string(), attrs.clone()));
+                        }
+                        OwlNode::IntersectionOf => {
+                            owned_spans.push((label.to_string(), attrs.clone()));
+                            owned_spans.push(("\n\n∩".to_string(), attrs.clone()));
+                        }
+                        OwlNode::UnionOf => {
+                            owned_spans.push((label.to_string(), attrs.clone()));
+                            owned_spans.push(("\n\n∪".to_string(), attrs.clone()));
+                        }
+                        _ => {
+                            owned_spans.push((label.to_string(), attrs.clone()));
+                        }
                     }
                 }
-                NodeType::InverseProperty => {
-                    if let Some(chs) = self.characteristics.get(&i) {
-                        let (ch1, ch2) = chs.split_once("\n").unwrap_or((chs, ""));
-                        let labels_vec: Vec<&str> = label.split('\n').collect();
-                        let label1 = labels_vec.get(0).map_or("", |v| *v).to_string();
-                        owned_spans.push((label1, attrs.clone()));
-                        owned_spans.push((
-                            format!("\n({})\n\n", ch1),
-                            attrs.clone().metrics(node_type_metrics),
-                        ));
-                        let label2 = labels_vec.get(1).map_or("", |v| *v).to_string();
-                        owned_spans.push((label2, attrs.clone()));
-                        owned_spans.push((
-                            format!("\n({})", ch2),
-                            attrs.clone().metrics(node_type_metrics),
-                        ));
-                    } else {
-                        let labels_vec: Vec<&str> = label.split('\n').collect();
-                        let mut label1 = labels_vec.get(0).map_or("", |v| *v).to_string();
-                        label1.push_str("\n\n\n");
-                        let label2 = labels_vec.get(1).map_or("", |v| *v).to_string();
-                        owned_spans.push((label1, attrs.clone()));
-                        owned_spans.push((label2, attrs.clone()));
+                ElementType::Owl(OwlType::Edge(edge)) => match edge {
+                    OwlEdge::InverseOf => {
+                        if let Some(chs) = self.characteristics.get(&i) {
+                            let (ch1, ch2) = chs.split_once("\n").unwrap_or((chs, ""));
+                            let labels_vec: Vec<&str> = label.split('\n').collect();
+                            let label1 = labels_vec.get(0).map_or("", |v| *v).to_string();
+                            owned_spans.push((label1, attrs.clone()));
+                            owned_spans.push((
+                                format!("\n({})\n\n", ch1),
+                                attrs.clone().metrics(node_type_metrics),
+                            ));
+                            let label2 = labels_vec.get(1).map_or("", |v| *v).to_string();
+                            owned_spans.push((label2, attrs.clone()));
+                            owned_spans.push((
+                                format!("\n({})", ch2),
+                                attrs.clone().metrics(node_type_metrics),
+                            ));
+                        } else {
+                            let labels_vec: Vec<&str> = label.split('\n').collect();
+                            let mut label1 = labels_vec.get(0).map_or("", |v| *v).to_string();
+                            label1.push_str("\n\n\n");
+                            let label2 = labels_vec.get(1).map_or("", |v| *v).to_string();
+                            owned_spans.push((label1, attrs.clone()));
+                            owned_spans.push((label2, attrs.clone()));
+                        }
                     }
-                }
-                NodeType::ExternalClass => {
-                    owned_spans.push((label.to_string(), attrs.clone()));
-                    owned_spans.push((
-                        "\n(external)".to_string(),
-                        attrs.clone().metrics(node_type_metrics),
-                    ));
-                }
-                NodeType::DeprecatedClass => {
-                    owned_spans.push((label.to_string(), attrs.clone()));
-                    owned_spans.push((
-                        "\n(deprecated)".to_string(),
-                        attrs.clone().metrics(node_type_metrics),
-                    ));
-                }
-                NodeType::DisjointWith => {
-                    owned_spans.push((label.to_string(), attrs.clone()));
-                    owned_spans.push((
-                        "\n\n(disjoint)".to_string(),
-                        attrs.clone().metrics(node_type_metrics),
-                    ));
-                }
-                NodeType::Thing => {
-                    owned_spans.push(("Thing".to_string(), attrs.clone()));
-                }
-                NodeType::Complement => {
-                    owned_spans.push((label.to_string(), attrs.clone()));
-                    owned_spans.push(("\n\n¬".to_string(), attrs.clone()));
-                }
-                NodeType::DisjointUnion => {
-                    owned_spans.push((label.to_string(), attrs.clone()));
-                    owned_spans.push(("\n\n1".to_string(), attrs.clone()));
-                }
-                NodeType::Intersection => {
-                    owned_spans.push((label.to_string(), attrs.clone()));
-                    owned_spans.push(("\n\n∩".to_string(), attrs.clone()));
-                }
-                NodeType::Union => {
-                    owned_spans.push((label.to_string(), attrs.clone()));
-                    owned_spans.push(("\n\n∪".to_string(), attrs.clone()));
-                }
-                NodeType::SubclassOf => {
-                    owned_spans.push(("Subclass of".to_string(), attrs.clone()));
-                }
+                    OwlEdge::DisjointWith => {
+                        owned_spans.push((label.to_string(), attrs.clone()));
+                        owned_spans.push((
+                            "\n\n(disjoint)".to_string(),
+                            attrs.clone().metrics(node_type_metrics),
+                        ));
+                    }
+                    _ => {
+                        owned_spans.push((label.to_string(), attrs.clone()));
+                    }
+                },
+                ElementType::Rdfs(RdfsType::Edge(edge)) => match edge {
+                    RdfsEdge::SubclassOf => {
+                        owned_spans.push(("Subclass of".to_string(), attrs.clone()));
+                    }
+                    _ => {
+                        owned_spans.push((label.to_string(), attrs.clone()));
+                    }
+                },
                 _ => {
                     owned_spans.push((label.to_string(), attrs.clone()));
                 }
             }
 
             // Append characteristic as a small parenthesized suffix if present.
-            if !matches!(self.node_types[i], NodeType::InverseProperty) {
+            if !matches!(
+                self.node_types[i],
+                ElementType::Owl(OwlType::Edge(OwlEdge::InverseOf))
+            ) {
                 if let Some(ch) = self.characteristics.get(&i) {
                     owned_spans.push((
                         format!("\n({})", ch),
@@ -1194,15 +1258,18 @@ impl State {
 
                 // Node logical coords
                 let node_logical = match self.node_types[i] {
-                    NodeType::InverseProperty => {
+                    ElementType::Owl(OwlType::Edge(OwlEdge::InverseOf)) => {
                         Vec2::new(self.positions[i][0], self.positions[i][1] + 18.0)
                     }
-                    NodeType::Complement
-                    | NodeType::DisjointUnion
-                    | NodeType::Union
-                    | NodeType::Intersection => {
-                        Vec2::new(self.positions[i][0], self.positions[i][1] + 24.0)
-                    }
+                    ElementType::Owl(OwlType::Node(node)) => match node {
+                        OwlNode::Complement
+                        | OwlNode::DisjointUnion
+                        | OwlNode::IntersectionOf
+                        | OwlNode::UnionOf => {
+                            Vec2::new(self.positions[i][0], self.positions[i][1] + 24.0)
+                        }
+                        _ => Vec2::new(self.positions[i][0], self.positions[i][1]),
+                    },
                     _ => Vec2::new(self.positions[i][0], self.positions[i][1]),
                 };
 
@@ -1225,7 +1292,9 @@ impl State {
                 let left = node_x_px - scaled_label_w * 0.5;
                 let line_height = 8.0;
                 let top = match self.node_types[i] {
-                    NodeType::EquivalentClass => node_y_px - 2.0 * line_height * self.zoom,
+                    ElementType::Owl(OwlType::Node(OwlNode::EquivalentClass)) => {
+                        node_y_px - 2.0 * line_height * self.zoom
+                    }
                     _ => node_y_px - (line_height * scale) * self.zoom,
                 };
 
@@ -1952,7 +2021,7 @@ impl State {
         // Iterate backwards to prioritize nodes drawn "on top"
         for (i, pos_array) in self.positions.iter().enumerate().rev() {
             // Skip nodes that aren't drawn
-            if matches!(self.node_types[i], NodeType::NoDraw) {
+            if matches!(self.node_types[i], ElementType::NoDraw) {
                 continue;
             }
 

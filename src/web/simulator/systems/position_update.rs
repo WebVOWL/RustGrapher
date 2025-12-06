@@ -62,71 +62,6 @@ impl<'a> System<'a> for UpdateNodePosition {
     }
 }
 
-// /// A node is being dragged.
-// #[derive(Default)]
-// pub struct DragStart;
-
-// impl<'a> System<'a> for DragStart {
-//     type SystemData = (
-//         Entities<'a>,
-//         ReadStorage<'a, Fixed>,
-//         Read<'a, PointIntersection>,
-//         Read<'a, LazyUpdate>,
-//     );
-
-//     fn run(&mut self, (entities, fixed, dragged_entity, updater): Self::SystemData) {
-//         info!("[{0}] Drag start", dragged_entity.0.id());
-
-//         // Enable simulation when node is dragged
-//         (&entities, &fixed).par_join().for_each(|(entity, _)| {
-//             updater.remove::<Fixed>(entity);
-//         });
-
-//         // Except for the dragged node
-//         updater.insert(dragged_entity.0, Dragged);
-//     }
-// }
-
-// /// A node is no longer being dragged.
-// #[derive(Default)]
-// pub struct DragEnd;
-
-// impl<'a> System<'a> for DragEnd {
-//     type SystemData = (Entities<'a>, ReadStorage<'a, Dragged>, Read<'a, LazyUpdate>);
-
-//     fn run(&mut self, (entities, dragged, updater): Self::SystemData) {
-//         for (entity, _) in (&entities, &dragged).join() {
-//             info!("[{0}] Drag end", entity.id());
-//             updater.remove::<Dragged>(entity);
-//         }
-//     }
-// }
-
-// /// The position of the dragged node has changed.
-// #[derive(Default)]
-// pub struct Dragging;
-
-// impl<'a> System<'a> for Dragging {
-//     type SystemData = (
-//         ReadStorage<'a, Dragged>,
-//         WriteStorage<'a, Position>,
-//         Read<'a, CursorPosition>,
-//         Read<'a, WorldSize>,
-//     );
-
-//     fn run(&mut self, (dragged, mut position, cursor_position, world_size): Self::SystemData) {
-//         for (pos, _) in (&position, &dragged).join() {
-//             // Normalize position to wgpu's coordinate system
-//             let norm_width = cursor_position.0.x.clamp(0.0, world_size.width as f32);
-//             let norm_height = (-cursor_position.0.y + world_size.height as f32)
-//                 .clamp(0.0, world_size.height as f32);
-//             pos.0 = Vec2::new(norm_width, norm_height);
-
-//             // info!("[{0}] Dragged position: {1}", entity_id, norm_pos);
-//         }
-//     }
-// }
-
 #[derive(SystemData)]
 pub struct DragStartSystemData<'a> {
     entities: Entities<'a>,
@@ -137,8 +72,6 @@ pub struct DragStartSystemData<'a> {
 /// A node is being dragged.
 pub fn sys_drag_start(mut data: DragStartSystemData) {
     if data.dragged_id.0 >= 0 {
-        info!("[{0}] Drag start", data.dragged_id.0);
-
         // Unfix everything
         (&mut data.node_states).par_join().for_each(|state| {
             state.fixed = false;

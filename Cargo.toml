@@ -30,6 +30,7 @@
     glyphon={git="https://github.com/grovesNL/glyphon", rev="de4b5b8"}
     log="0.4.0"
     rayon="1.10.0"
+    rkyv="0.8.12"
     strum="0.27"
     strum_macros="0.27"
     web-time="1.1.0"
