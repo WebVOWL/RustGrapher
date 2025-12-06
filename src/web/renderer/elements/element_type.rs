@@ -75,7 +75,6 @@ impl From<ElementType> for u64 {
 impl From<ElementType> for u32 {
     #[doc =  include_str!("../../../../ELEMENT_RANGES.md")]
     fn from(value: ElementType) -> Self {
-        let test = include_str!("../../../../ELEMENT_RANGES.md");
         match value {
             ElementType::NoDraw => 0,
             // ElementType::Rdf(RdfType::Node(node)) => match node {},
