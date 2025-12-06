@@ -1,6 +1,7 @@
 [package]
     authors=[
         "Alexander Neuhäuser <alexander.neuhaeuser@leafnova.net>",
+        "nikarnik",
         "TheRealMorgenfrue",
     ]
     description="Simulate and visualize a force directed graph"
@@ -16,8 +17,8 @@
     license-file="LICENSE"
     name="grapher"
     readme="README.md"
-    repository="https://github.com/WebVOWL/RustGrapher"
-    version="0.3.2"
+    repository="https://github.com/WebVOWL/WasmGrapher"
+    version="0.4.3"
 
 [lib]
     crate-type=["cdylib", "rlib"]
@@ -26,26 +27,40 @@
     anyhow="1.0.0"
     bytemuck={version="1.16.0", features=["derive"]}
     glam="0.29.0"
+    glyphon={git="https://github.com/grovesNL/glyphon", rev="de4b5b8"}
     log="0.4.0"
     rayon="1.10.0"
+    strum="0.27"
+    strum_macros="0.27"
+    web-time="1.1.0"
+    wgpu={version="27.0.1", default-features=false, features=[
+        "wgsl",
+        "std",
+        "parking_lot",
+    ]}
     winit="0.30.0"
-    [dependencies.wgpu]
-        default-features=false
-        features=[
-            "webgl",
-            "static-dxc",
-            # "web",
-            "vulkan",
-            "std",
-            "wgsl",
-            "parking_lot",
-            # webgpu # when API is stable
-        ]
-        version="26.0.1"
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+    env_logger="0.11.0"
+    glium="0.33.0"
+    petgraph="0.6.5"
+    pollster="0.4.0"
+    rand="0.8.5"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+    console_error_panic_hook="0.1.6"
+    console_log="1.0.0"
+    wasm-bindgen="0.2.100"
+    wasm-bindgen-futures="0.4.50"
+
+    [dependencies.web-sys]
+        version="0.3.77"
+        # https://docs.rs/web-sys/latest/web_sys/#modules
+        features=["Document", "Element", "Window"]
 
     [dependencies.specs]
         default-features=false
-        features=["specs-derive", "parallel", "stdweb"]
+        features=["derive", "parallel", "stdweb"]
         git="https://github.com/WebVOWL/specs"
         version="0.20.1"
 
@@ -74,18 +89,12 @@
     serde={version="1.0.0", features=["derive"]}
     serde_json="1.0.0"
 
-[[example]]
-    name="wikipedia"
-    path="examples/wikipedia.rs"
-
-[[bench]]
-    harness=false
-    name="physics_bench"
-
-[lints.clippy]
-    derivable_impls="allow"
-    new_without_default="allow"
-
+[features]
+    default=["web"]
+    static=["wgpu/static-dxc"]
+    web=["wgpu/web", "webgpu", "static"]
+    webgl=["wgpu/webgl"]
+    webgpu=["wgpu/webgpu"]
 
 # Default profile for devs, fast to compile, okay enough to run
 [profile.dev]

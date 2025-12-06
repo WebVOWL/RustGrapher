@@ -1,68 +1,58 @@
->[!NOTE]
-> This fork ports RustGrapher to WebAssembly  
-> The official supported platform is `wasm32-unknown-unknown`, however, other wasm targets might work as well  
-> Any other target platform is not supported and will not work!
+# WasmGrapher
 
-# RustGrapher
-
-A library to simulate and visualize a 2D [force directed graph](https://en.wikipedia.org/wiki/Force-directed_graph_drawing) in rust.
-![plot](./example_images/example.gif)
+A library written in Rust to simulate and visualize a 2D [force directed graph](https://en.wikipedia.org/wiki/Force-directed_graph_drawing).
 
 ## Features
 
-- Render PetGraphs in 2D
-- Physics based positioning via a Force Directed Graph
-- Drag Nodes to a new position
-- Place new nodes
-- WIP: Build graphs using the UI
+-   Render graphs in 2D
+-   Physics-based positioning via a force-directed graph
+-   Drag nodes to a new position
+-   Zoom/pan the graph
+-   Supports WebAssembly out of the box
 
-## Algorithms
+## Supported platforms
 
-### Barnes–Hut
+WasmGrapher groups platform support into three tiers, each with a different set of guarantees.
 
-Barnes-Hut is a approximation algorithm for n-body simulation.
+### Tier 1
 
-The force directed graph calculates for each node the repulsive force to other nodes which will lead to a complexity of $O(n^2)$.
+Tier 1 targets are guaranteed to work. They are tested by the developers before a release.  
+An issue with Tier 1 targets is considered a bug and will be resolved.
 
-Using a k-d Tree(Quadtree) the Barnes-Hut algorithm groups far away nodes and only calculates the repulsive force once.This results in a complexity of $O(nlogn)$.
+|          Target          |                            Browsers                             |                        Notes                        |
+| :----------------------: | :-------------------------------------------------------------: | :-------------------------------------------------: |
+| `wasm32-unknown-unknown` | Firefox v145 or later, Chrome v143 or later, Edge v142 or later | Tested on Windows and Linux (Only Firefox on Linux) |
+
+### Tier 2
+
+Tier 2 targets may work but have not been tested by the developers.  
+Support for issues with Tier 2 targets is given at the developers' discretion.
+
+|          Target          |                                         Notes                                          |
+| :----------------------: | :------------------------------------------------------------------------------------: |
+| `wasm64-unknown-unknown` | May work when [wasm-bindgen](https://github.com/wasm-bindgen/wasm-bindgen) supports it |
+
+### Tier 3
+
+Tier 3 targets will most likely not work.  
+There will be no support for issues with Tier 3 targets.
+
+Every target not listed in Tier 1 or Tier 2 is a Tier 3 target.
 
 ## Performance
 
-> [!TIP]
-> Run the project with `--release` for the best performance(~10x).
-
-On a Ryzen 7 3700X the library can calculate 2000 simulation steps per second at 1000 Nodes. (Using 16 Physics threads)
+Pending
 
 ## Controls
 
-- `return` - Centers the camera on the average poisson of all nodes.
-- `space` - Start/Pause simulation
-- `scroll wheel` - Zoom in or out
-- `W`, `A`, `S` and `D` - to move the camera
-- `Click` and `drag` - move nodes
-- `P` - switch from drag to node place(only works while simulation is paused)
+-   `space` - Start/Pause simulation
+-   `scroll wheel` - Zoom in or out
+-   `Left mouse button` - pan or drag nodes
 
 ## Usage
 
-```rust
-    // Build a PetGraph
-    let mut rng = rand::thread_rng();
-    let graph: petgraph::Graph<(), (), Directed> =
-        petgraph_gen::barabasi_albert_graph(&mut rng, 1000, 1, None);
+Pending
 
-    // Configure the simulator
-    let simulator = SimulatorBuilder::new()
-        .delta_time(0.01)
-        .freeze_threshold(-1.0)
-        .build(graph.into());
+## Acknowledgements
 
-    // Start the renderer
-    let renderer = Renderer::new(simulator);
-    renderer.create_window();
-```
-
-## Examples
-
-- [Basic Barabasi Albert Graph](examples/basic.rs)
-- [Section of Wikipedia Graph](examples/wikipedia.rs)
-- [Headless Graph](examples/headless.rs)
+This project started as a fork of [RustGrapher](https://github.com/iceHtwoO/RustGrapher) by Alexander Neuhäuser (iceHtwoO). While large portions of the codebase have been written from scratch, there is still code from RustGrapher in this repository.
