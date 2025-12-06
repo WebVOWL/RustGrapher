@@ -8,7 +8,7 @@ The following types can _safely_ store the code of an element enum:
 -   u64
 -   u128
 
-If no negative numbers are present, the code of an element enum can also be cast from:
+If no negative numbers are present and the enum's code can fit, the code of an element enum can also be stored in:
 
 -   i32
 -   i64
